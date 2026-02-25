@@ -33,6 +33,7 @@ const defaultSettings: AppSettings = {
 const queue: QueueItem[] = [];
 const processor = new ProcessorClient(resolveFfmpegPath());
 let activeJobId: string | null = null;
+let queuePaused = false;
 const appLogs: AppLogEntry[] = [];
 
 const appendLog = (message: string, level: LogLevel = 'info') => {
@@ -76,7 +77,8 @@ const emitQueueState = () => {
   const snapshot = {
     items: [...queue],
     activeJobId,
-    hasRunningJob: Boolean(activeJobId)
+    hasRunningJob: Boolean(activeJobId),
+    isPaused: queuePaused
   };
 
   for (const window of BrowserWindow.getAllWindows()) {
@@ -112,7 +114,7 @@ const queueItemToJob = (item: QueueItem): ProcessingJob => ({
 const findNextPending = () => queue.find((item) => item.status === 'pending');
 
 const processNextPending = () => {
-  if (activeJobId) {
+  if (activeJobId || queuePaused) {
     return;
   }
 
@@ -230,7 +232,7 @@ ipcMain.handle('settings:get', () => readSettings());
 ipcMain.handle('settings:set', async (_event, next: Partial<AppSettings>) => persistSettings(next));
 ipcMain.handle('app-log:list', () => [...appLogs]);
 
-ipcMain.handle('queue:list', () => ({ items: [...queue], activeJobId, hasRunningJob: Boolean(activeJobId) }));
+ipcMain.handle('queue:list', () => ({ items: [...queue], activeJobId, hasRunningJob: Boolean(activeJobId), isPaused: queuePaused }));
 
 ipcMain.handle('queue:add', async (_event, sourcePaths: string[]) => {
   const settings = await readSettings();
@@ -286,8 +288,31 @@ ipcMain.handle('queue:clearCompleted', () => {
 });
 
 ipcMain.handle('queue:start', () => {
+  queuePaused = false;
   appendLog('Queue start requested.');
   processNextPending();
+  emitQueueState();
+  return { ok: true as const };
+});
+
+ipcMain.handle('queue:pause', () => {
+  if (!queuePaused) {
+    queuePaused = true;
+    appendLog('Queue paused. Current job will finish before processing stops.');
+    emitQueueState();
+  }
+
+  return { ok: true as const };
+});
+
+ipcMain.handle('queue:resume', () => {
+  if (queuePaused) {
+    queuePaused = false;
+    appendLog('Queue resumed.');
+    processNextPending();
+    emitQueueState();
+  }
+
   return { ok: true as const };
 });
 
