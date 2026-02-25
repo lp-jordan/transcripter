@@ -1,5 +1,5 @@
 import './style.css';
-import type { QueueState } from '../preload/preload';
+import type { AppLogEntry, QueueState } from '../preload/preload';
 
 const ENABLE_PAUSE = false;
 
@@ -21,6 +21,9 @@ const clearCompletedButton = document.getElementById('clear-completed') as HTMLB
 const startQueueButton = document.getElementById('start-queue') as HTMLButtonElement;
 const cancelCurrentButton = document.getElementById('cancel-current') as HTMLButtonElement;
 const pauseQueueButton = document.getElementById('pause-queue') as HTMLButtonElement;
+const toggleConsoleButton = document.getElementById('toggle-console') as HTMLButtonElement;
+const consolePanel = document.getElementById('console-panel') as HTMLElement;
+const consoleOutput = document.getElementById('console-output') as HTMLPreElement;
 
 const selectedIds = new Set<string>();
 let queueState: QueueState = {
@@ -29,11 +32,41 @@ let queueState: QueueState = {
   hasRunningJob: false
 };
 
+let showConsole = false;
+const appLogs: AppLogEntry[] = [];
+const MAX_CONSOLE_LINES = 200;
+
 const updateButtons = () => {
   removeSelectedButton.disabled = selectedIds.size === 0;
   cancelCurrentButton.disabled = !queueState.hasRunningJob;
   startQueueButton.disabled = queueState.hasRunningJob || queueState.items.every((item) => item.status !== 'pending');
   pauseQueueButton.hidden = !ENABLE_PAUSE;
+};
+
+
+const formatLogEntry = (entry: AppLogEntry): string => {
+  const time = new Date(entry.timestamp).toLocaleTimeString();
+  const level = entry.level.toUpperCase().padEnd(5, ' ');
+  return `[${time}] ${level} ${entry.message}`;
+};
+
+const renderConsole = () => {
+  consolePanel.hidden = !showConsole;
+  toggleConsoleButton.textContent = showConsole ? 'Hide Console' : 'Show Console';
+  if (!showConsole) {
+    return;
+  }
+
+  consoleOutput.textContent = appLogs.map(formatLogEntry).join('\n');
+  consoleOutput.scrollTop = consoleOutput.scrollHeight;
+};
+
+const pushLog = (entry: AppLogEntry) => {
+  appLogs.push(entry);
+  if (appLogs.length > MAX_CONSOLE_LINES) {
+    appLogs.splice(0, appLogs.length - MAX_CONSOLE_LINES);
+  }
+  renderConsole();
 };
 
 const createQueueItem = (item: QueueState['items'][number]): HTMLLIElement => {
@@ -161,6 +194,11 @@ cancelCurrentButton.addEventListener('click', async () => {
   await window.transcripter.queue.cancelCurrent();
 });
 
+toggleConsoleButton.addEventListener('click', () => {
+  showConsole = !showConsole;
+  renderConsole();
+});
+
 settingsForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   const next = {
@@ -197,11 +235,19 @@ const bootstrap = async () => {
   vttOutputCheckbox.checked = settings.outputOptions.vtt;
   jsonOutputCheckbox.checked = settings.outputOptions.json;
 
+  const initialLogs = await window.transcripter.logs.list();
+  appLogs.push(...initialLogs.slice(-MAX_CONSOLE_LINES));
+
+  window.transcripter.logs.onEntry((entry) => {
+    pushLog(entry);
+  });
+
   window.transcripter.queue.onState((nextState) => {
     queueState = nextState;
     renderQueue();
   });
 
+  renderConsole();
   await refreshQueueState();
 };
 
