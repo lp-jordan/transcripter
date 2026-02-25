@@ -13,6 +13,7 @@ import type {
 
 const canceledJobs = new Set<string>();
 const activeProcesses = new Map<string, ChildProcessWithoutNullStreams>();
+const ffmpegPath = process.env.TRANSCRIPTER_FFMPEG_PATH;
 
 const postMessage = (message: WorkerOutboundMessage) => {
   if (typeof process.send === 'function') {
@@ -88,6 +89,7 @@ const runChildProcess = async (jobId: string, command: string, args: string[], o
 
 const extractAudio = async (job: ProcessingJob, tempDir: string): Promise<string> => {
   const outputWavPath = path.join(tempDir, `${job.id}.wav`);
+  const command = ffmpegPath && path.isAbsolute(ffmpegPath) ? ffmpegPath : 'ffmpeg';
 
   postMessage({
     type: 'progress',
@@ -99,7 +101,7 @@ const extractAudio = async (job: ProcessingJob, tempDir: string): Promise<string
     }
   });
 
-  await runChildProcess(job.id, 'ffmpeg', [
+  await runChildProcess(job.id, command, [
     '-y',
     '-i',
     job.filePath,
