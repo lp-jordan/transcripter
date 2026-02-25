@@ -143,7 +143,7 @@ h1 {
   padding: 0;
   margin: 0;
   display: grid;
-  gap: 0.5rem;
+  gap: 0.3rem;
 }
 
 .queue-item {
@@ -157,6 +157,10 @@ h1 {
   padding: 0.55rem 0.65rem 0.8rem;
   position: relative;
   --queue-item-status-color: var(--queue-status-muted);
+}
+
+.queue-item + .queue-item {
+  border-top-color: rgba(100, 116, 139, 0.78);
 }
 
 .queue-item.status-pending,
@@ -179,7 +183,7 @@ h1 {
 .queue-item-details {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 0.2rem;
+  gap: 0.12rem;
   min-width: 0;
 }
 
@@ -187,7 +191,7 @@ h1 {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.35rem;
 }
 
 .queue-item-main {
@@ -199,7 +203,7 @@ h1 {
 .queue-item-title {
   display: flex;
   align-items: center;
-  gap: 0.45rem;
+  gap: 0.35rem;
   min-width: 0;
   width: 100%;
 }
@@ -215,13 +219,17 @@ h1 {
 
 .queue-item-status {
   color: var(--queue-item-status-color);
-  font-size: 0.82rem;
+  font-size: 0.76rem;
+  letter-spacing: 0.015em;
+  text-transform: uppercase;
+  font-weight: 600;
   white-space: nowrap;
 }
 
 .queue-item-meta {
-  color: #94a3b8;
-  font-size: 0.78rem;
+  color: #9aa7bc;
+  font-size: 0.72rem;
+  line-height: 1.25;
 }
 
 .queue-item-details span,
@@ -240,9 +248,9 @@ h1 {
   left: 0;
   right: 0;
   bottom: 0;
-  height: 2px;
+  height: 1px;
   background: rgba(148, 163, 184, 0.2);
-  border-radius: 0 0 8px 8px;
+  border-radius: 0 0 7px 7px;
   overflow: hidden;
 }
 
