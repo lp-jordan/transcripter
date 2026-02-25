@@ -150,6 +150,9 @@ const createQueueItem = (item: QueueState['items'][number]): HTMLLIElement => {
   const header = document.createElement('div');
   header.className = 'queue-item-header';
 
+  const main = document.createElement('div');
+  main.className = 'queue-item-main';
+
   const title = document.createElement('label');
   title.className = 'queue-item-title';
 
@@ -172,12 +175,13 @@ const createQueueItem = (item: QueueState['items'][number]): HTMLLIElement => {
   source.title = item.sourcePath;
 
   title.append(selector, source);
+  main.append(title);
 
   const status = document.createElement('strong');
   status.className = 'queue-item-status';
   status.textContent = `${formatStatusLabel(item.status)} • ${Math.round(item.progress)}%`;
 
-  header.append(title, status);
+  header.append(main, status);
 
   const config = document.createElement('small');
   config.className = 'queue-item-meta';
