@@ -5,7 +5,7 @@ const dropZone = document.getElementById('drop-zone') as HTMLDivElement;
 const queueList = document.getElementById('queue-list') as HTMLUListElement;
 const settingsForm = document.getElementById('settings-form') as HTMLFormElement;
 const outputDirectoryInput = document.getElementById('output-directory') as HTMLInputElement;
-const languageInput = document.getElementById('language') as HTMLInputElement;
+const pickOutputDirectoryButton = document.getElementById('pick-output-directory') as HTMLButtonElement;
 const modelSelect = document.getElementById('model') as HTMLSelectElement;
 const txtOutputCheckbox = document.getElementById('format-txt') as HTMLInputElement;
 const timecodedTxtOutputCheckbox = document.getElementById('format-timecoded-txt') as HTMLInputElement;
@@ -44,7 +44,6 @@ const updateButtons = () => {
   pauseQueueButton.textContent = queueState.isPaused ? 'Resume' : 'Pause';
 };
 
-
 const formatLogEntry = (entry: AppLogEntry): string => {
   const time = new Date(entry.timestamp).toLocaleTimeString();
   const level = entry.level.toUpperCase().padEnd(5, ' ');
@@ -53,7 +52,9 @@ const formatLogEntry = (entry: AppLogEntry): string => {
 
 const renderConsole = () => {
   consolePanel.hidden = !showConsole;
-  toggleConsoleButton.textContent = showConsole ? 'Hide Console' : 'Show Console';
+  toggleConsoleButton.setAttribute('aria-expanded', String(showConsole));
+  toggleConsoleButton.title = showConsole ? 'Hide process console' : 'Show process console';
+
   if (!showConsole) {
     return;
   }
@@ -69,6 +70,8 @@ const pushLog = (entry: AppLogEntry) => {
   }
   renderConsole();
 };
+
+const getFileName = (sourcePath: string) => sourcePath.split(/[/\\]/).pop() ?? sourcePath;
 
 const createQueueItem = (item: QueueState['items'][number]): HTMLLIElement => {
   const li = document.createElement('li');
@@ -94,14 +97,15 @@ const createQueueItem = (item: QueueState['items'][number]): HTMLLIElement => {
   status.textContent = `${item.status} • ${Math.round(item.progress)}%`;
 
   const source = document.createElement('span');
-  source.textContent = item.sourcePath;
+  source.textContent = getFileName(item.sourcePath);
+  source.title = item.sourcePath;
 
   const config = document.createElement('small');
   const formats = Object.entries(item.outputOptions)
     .filter(([, enabled]) => enabled)
     .map(([name]) => name)
     .join(', ');
-  config.textContent = `Output: ${item.outputDirectory} | Model: ${item.model} | Language: ${item.language || 'auto'} | Formats: ${formats}`;
+  config.textContent = `Output: ${item.outputDirectory} | Model: ${item.model} | Language: English | Formats: ${formats}`;
 
   details.append(status, source, config);
 
@@ -153,6 +157,29 @@ const addFiles = async (paths: string[]) => {
   }
 
   await window.transcripter.queue.add(paths);
+};
+
+const saveSettings = async () => {
+  const saved = await window.transcripter.settings.set({
+    outputDirectory: outputDirectoryInput.value,
+    language: 'en',
+    model: modelSelect.value as 'tiny' | 'base' | 'small',
+    outputOptions: {
+      txt: txtOutputCheckbox.checked,
+      timecodedTxt: timecodedTxtOutputCheckbox.checked,
+      srt: srtOutputCheckbox.checked,
+      vtt: vttOutputCheckbox.checked,
+      json: jsonOutputCheckbox.checked
+    }
+  });
+
+  outputDirectoryInput.value = saved.outputDirectory;
+  modelSelect.value = saved.model;
+  txtOutputCheckbox.checked = saved.outputOptions.txt;
+  timecodedTxtOutputCheckbox.checked = saved.outputOptions.timecodedTxt;
+  srtOutputCheckbox.checked = saved.outputOptions.srt;
+  vttOutputCheckbox.checked = saved.outputOptions.vtt;
+  jsonOutputCheckbox.checked = saved.outputOptions.json;
 };
 
 dropZone.addEventListener('dragover', (event) => {
@@ -212,35 +239,29 @@ toggleConsoleButton.addEventListener('click', () => {
   renderConsole();
 });
 
-settingsForm.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  const next = {
-    outputDirectory: outputDirectoryInput.value,
-    language: languageInput.value,
-    model: modelSelect.value as 'tiny' | 'base' | 'small',
-    outputOptions: {
-      txt: txtOutputCheckbox.checked,
-      timecodedTxt: timecodedTxtOutputCheckbox.checked,
-      srt: srtOutputCheckbox.checked,
-      vtt: vttOutputCheckbox.checked,
-      json: jsonOutputCheckbox.checked
-    }
-  };
-  const saved = await window.transcripter.settings.set(next);
-  outputDirectoryInput.value = saved.outputDirectory;
-  languageInput.value = saved.language;
-  modelSelect.value = saved.model;
-  txtOutputCheckbox.checked = saved.outputOptions.txt;
-  timecodedTxtOutputCheckbox.checked = saved.outputOptions.timecodedTxt;
-  srtOutputCheckbox.checked = saved.outputOptions.srt;
-  vttOutputCheckbox.checked = saved.outputOptions.vtt;
-  jsonOutputCheckbox.checked = saved.outputOptions.json;
+pickOutputDirectoryButton.addEventListener('click', async () => {
+  const selectedPath = await window.transcripter.settings.pickOutputDirectory(outputDirectoryInput.value);
+  if (!selectedPath) {
+    return;
+  }
+
+  outputDirectoryInput.value = selectedPath;
+  await saveSettings();
 });
+
+settingsForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+});
+
+for (const element of [modelSelect, txtOutputCheckbox, timecodedTxtOutputCheckbox, srtOutputCheckbox, vttOutputCheckbox, jsonOutputCheckbox]) {
+  element.addEventListener('change', () => {
+    void saveSettings();
+  });
+}
 
 const bootstrap = async () => {
   const settings = await window.transcripter.settings.get();
   outputDirectoryInput.value = settings.outputDirectory;
-  languageInput.value = settings.language;
   modelSelect.value = settings.model;
   txtOutputCheckbox.checked = settings.outputOptions.txt;
   timecodedTxtOutputCheckbox.checked = settings.outputOptions.timecodedTxt;

@@ -40,7 +40,9 @@ const api = {
   },
   settings: {
     get: (): Promise<AppSettings> => ipcRenderer.invoke('settings:get'),
-    set: (next: Partial<AppSettings>): Promise<AppSettings> => ipcRenderer.invoke('settings:set', next)
+    set: (next: Partial<AppSettings>): Promise<AppSettings> => ipcRenderer.invoke('settings:set', next),
+    pickOutputDirectory: (defaultPath?: string): Promise<string | null> =>
+      ipcRenderer.invoke('settings:pickOutputDirectory', defaultPath)
   },
   logs: {
     list: (): Promise<AppLogEntry[]> => ipcRenderer.invoke('app-log:list'),
