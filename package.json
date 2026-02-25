@@ -16,7 +16,8 @@
     "package": "npm run build && electron-builder",
     "package:win": "npm run build && electron-builder --win",
     "package:mac": "npm run build && electron-builder --mac",
-    "build:worker": "esbuild src/main/processing-worker.ts --bundle --platform=node --target=node20 --outfile=dist/main/processing-worker.js"
+    "build:worker": "esbuild src/main/processing-worker.ts --bundle --platform=node --target=node20 --outfile=dist/main/processing-worker.js",
+    "postinstall": "node scripts/download-whisper-base-model.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.13.10",
@@ -92,10 +93,18 @@
           "ffmpeg*",
           "LICENSE*"
         ]
+      },
+      {
+        "from": "node_modules/nodejs-whisper/cpp/whisper.cpp/models",
+        "to": "whisper-models",
+        "filter": [
+          "ggml-base.bin"
+        ]
       }
     ]
   },
   "dependencies": {
-    "ffmpeg-static": "^5.2.0"
+    "ffmpeg-static": "^5.2.0",
+    "nodejs-whisper": "^0.2.9"
   }
 }
