@@ -1,8 +1,6 @@
 import './style.css';
 import type { AppLogEntry, QueueState } from '../preload/preload';
 
-const ENABLE_PAUSE = false;
-
 const dropZone = document.getElementById('drop-zone') as HTMLDivElement;
 const queueList = document.getElementById('queue-list') as HTMLUListElement;
 const settingsForm = document.getElementById('settings-form') as HTMLFormElement;
@@ -29,7 +27,8 @@ const selectedIds = new Set<string>();
 let queueState: QueueState = {
   items: [],
   activeJobId: null,
-  hasRunningJob: false
+  hasRunningJob: false,
+  isPaused: false
 };
 
 let showConsole = false;
@@ -40,7 +39,9 @@ const updateButtons = () => {
   removeSelectedButton.disabled = selectedIds.size === 0;
   cancelCurrentButton.disabled = !queueState.hasRunningJob;
   startQueueButton.disabled = queueState.hasRunningJob || queueState.items.every((item) => item.status !== 'pending');
-  pauseQueueButton.hidden = !ENABLE_PAUSE;
+  pauseQueueButton.hidden = false;
+  pauseQueueButton.disabled = !queueState.hasRunningJob && queueState.items.every((item) => item.status !== 'pending');
+  pauseQueueButton.textContent = queueState.isPaused ? 'Resume' : 'Pause';
 };
 
 
@@ -192,6 +193,15 @@ startQueueButton.addEventListener('click', async () => {
 
 cancelCurrentButton.addEventListener('click', async () => {
   await window.transcripter.queue.cancelCurrent();
+});
+
+pauseQueueButton.addEventListener('click', async () => {
+  if (queueState.isPaused) {
+    await window.transcripter.queue.resume();
+    return;
+  }
+
+  await window.transcripter.queue.pause();
 });
 
 toggleConsoleButton.addEventListener('click', () => {
