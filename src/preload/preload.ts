@@ -5,6 +5,7 @@ export type QueueState = {
   items: QueueItem[];
   activeJobId: string | null;
   hasRunningJob: boolean;
+  isPaused: boolean;
 };
 
 export type AppLogEntry = {
@@ -25,6 +26,8 @@ const api = {
     removeSelected: (ids: string[]): Promise<{ ok: true }> => ipcRenderer.invoke('queue:removeSelected', ids),
     clearCompleted: (): Promise<{ ok: true }> => ipcRenderer.invoke('queue:clearCompleted'),
     start: (): Promise<{ ok: true }> => ipcRenderer.invoke('queue:start'),
+    pause: (): Promise<{ ok: true }> => ipcRenderer.invoke('queue:pause'),
+    resume: (): Promise<{ ok: true }> => ipcRenderer.invoke('queue:resume'),
     cancelCurrent: (): Promise<{ ok: true }> => ipcRenderer.invoke('queue:cancelCurrent'),
     openOutputFolder: (id: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('queue:openOutputFolder', id),
     onState: (listener: (state: QueueState) => void): (() => void) => {
