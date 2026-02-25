@@ -36,6 +36,129 @@ const sanitizeSegment = (segment: Partial<Segment>): Segment | null => {
   };
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
+
+const parseTimestampSeconds = (value: string): number | null => {
+  const trimmedValue = value.trim();
+  if (!trimmedValue) {
+    return null;
+  }
+
+  const numericValue = Number.parseFloat(trimmedValue);
+  if (Number.isFinite(numericValue) && /^\d+(?:\.\d+)?s?$/i.test(trimmedValue)) {
+    return numericValue;
+  }
+
+  const timestampMatch = trimmedValue.match(/^(?:(\d+):)?(\d{1,2}):(\d{1,2}(?:\.\d+)?)$/);
+  if (!timestampMatch) {
+    return null;
+  }
+
+  const [, hoursRaw, minutesRaw, secondsRaw] = timestampMatch;
+  const hours = hoursRaw ? Number.parseInt(hoursRaw, 10) : 0;
+  const minutes = Number.parseInt(minutesRaw, 10);
+  const seconds = Number.parseFloat(secondsRaw);
+
+  if ([hours, minutes, seconds].some((part) => Number.isNaN(part))) {
+    return null;
+  }
+
+  return hours * 3600 + minutes * 60 + seconds;
+};
+
+const toSeconds = (value: unknown): number | null => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    return parseTimestampSeconds(value);
+  }
+
+  return null;
+};
+
+const toOffsetSeconds = (value: unknown): number | null => {
+  const parsedSeconds = toSeconds(value);
+  if (parsedSeconds === null) {
+    return null;
+  }
+
+  if (typeof value === 'number' && Number.isInteger(value) && parsedSeconds >= 1000) {
+    return parsedSeconds / 1000;
+  }
+
+  if (typeof value === 'string' && /^\d+$/.test(value.trim()) && parsedSeconds >= 1000) {
+    return parsedSeconds / 1000;
+  }
+
+  return parsedSeconds;
+};
+
+const parseTranscriptionPayload = (payload: unknown): { transcriptText: string; segments: Segment[] } => {
+  const parsed = isRecord(payload) ? payload : {};
+  const candidateSegments = Array.isArray(parsed.segments) ? parsed.segments : [];
+  const normalizedSegments = candidateSegments
+    .map((segment) => (isRecord(segment) ? sanitizeSegment(segment as Partial<Segment>) : null))
+    .filter((segment): segment is Segment => Boolean(segment));
+
+  const directText = typeof parsed.text === 'string' ? parsed.text.trim() : '';
+  if (directText || normalizedSegments.length > 0) {
+    return {
+      transcriptText: directText || normalizedSegments.map((segment) => segment.text).join(' ').trim(),
+      segments: normalizedSegments
+    };
+  }
+
+  const transcriptionEntries = Array.isArray(parsed.transcription) ? parsed.transcription : [];
+  const entryTexts: string[] = [];
+  const transcriptionSegments: Segment[] = [];
+
+  for (const entry of transcriptionEntries) {
+    if (!isRecord(entry)) {
+      continue;
+    }
+
+    const textValue = typeof entry.text === 'string' ? entry.text.trim() : '';
+    if (textValue) {
+      entryTexts.push(textValue);
+    }
+
+    const timestamp = isRecord(entry.timestamp) ? entry.timestamp : null;
+    const offsets = isRecord(entry.offsets) ? entry.offsets : null;
+
+    const start =
+      toSeconds(entry.start) ??
+      toSeconds(entry.from) ??
+      toSeconds(entry.t0) ??
+      toSeconds(timestamp?.start) ??
+      toSeconds(timestamp?.from) ??
+      toOffsetSeconds(offsets?.start) ??
+      toOffsetSeconds(offsets?.from);
+
+    const end =
+      toSeconds(entry.end) ??
+      toSeconds(entry.to) ??
+      toSeconds(entry.t1) ??
+      toSeconds(timestamp?.end) ??
+      toSeconds(timestamp?.to) ??
+      toOffsetSeconds(offsets?.end) ??
+      toOffsetSeconds(offsets?.to);
+
+    if (textValue && typeof start === 'number' && typeof end === 'number') {
+      const segment = sanitizeSegment({ start, end, text: textValue });
+      if (segment) {
+        transcriptionSegments.push(segment);
+      }
+    }
+  }
+
+  return {
+    transcriptText: entryTexts.join(' ').trim(),
+    segments: transcriptionSegments
+  };
+};
+
 const deterministicTempDirectory = (job: ProcessingJob): string => {
   const digest = createHash('sha256').update(`${job.filePath}:${job.id}`).digest('hex').slice(0, 16);
   return path.join(os.tmpdir(), 'transcripter', digest);
@@ -230,9 +353,7 @@ const transcribeAudio = async (job: ProcessingJob, wavPath: string, tempDir: str
   ensureNotCanceled(job.id);
 
   const jsonRaw = await fs.readFile(whisperOutputPath, 'utf8');
-  const parsed = JSON.parse(jsonRaw) as { text?: string; segments?: Array<Partial<Segment>> };
-
-  const segments = (parsed.segments ?? []).map(sanitizeSegment).filter((segment): segment is Segment => Boolean(segment));
+  const { transcriptText, segments } = parseTranscriptionPayload(JSON.parse(jsonRaw));
 
   postMessage({
     type: 'progress',
@@ -245,7 +366,7 @@ const transcribeAudio = async (job: ProcessingJob, wavPath: string, tempDir: str
   });
 
   return {
-    transcriptText: typeof parsed.text === 'string' ? parsed.text.trim() : segments.map((segment) => segment.text).join(' ').trim(),
+    transcriptText,
     segments
   };
 };
