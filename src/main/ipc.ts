@@ -289,6 +289,20 @@ ipcMain.handle('file:writeText', async (_event, filePath: string, content: strin
 
 ipcMain.handle('settings:get', () => readSettings());
 ipcMain.handle('settings:set', async (_event, next: Partial<AppSettings>) => persistSettings(next));
+
+ipcMain.handle('settings:pickOutputDirectory', async (_event, defaultPath?: string) => {
+  const result = await dialog.showOpenDialog({
+    defaultPath,
+    properties: ['openDirectory', 'createDirectory']
+  });
+
+  if (result.canceled) {
+    return null;
+  }
+
+  return result.filePaths[0] ?? null;
+});
+
 ipcMain.handle('app-log:list', () => [...appLogs]);
 
 ipcMain.handle('queue:list', () => ({ items: [...queue], activeJobId, hasRunningJob: Boolean(activeJobId), isPaused: queuePaused }));

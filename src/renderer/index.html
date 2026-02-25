@@ -6,10 +6,16 @@
     <title>Transcripter</title>
   </head>
   <body>
+    <button id="toggle-console" class="console-fab" type="button" aria-controls="console-panel" aria-expanded="false">&gt;_</button>
+
+    <section id="console-panel" class="console-popover" hidden>
+      <h2>Process Console</h2>
+      <pre id="console-output" aria-live="polite"></pre>
+    </section>
+
     <main class="layout">
       <header>
-        <h1>Transcripter Queue</h1>
-        <p id="runtime-help">This app bundles FFmpeg and whisper.cpp runtime binaries. Whisper models are loaded from the bundled <code>whisper-models</code> folder; add extra ggml models there if you want tiny/small variants.</p>
+        <h1>LeaderPass Transcripter</h1>
       </header>
 
       <section id="drop-zone" class="drop-zone">
@@ -25,26 +31,19 @@
           <button id="start-queue" type="button">Start</button>
           <button id="cancel-current" type="button">Cancel Current</button>
           <button id="pause-queue" type="button" hidden>Pause</button>
-          <button id="toggle-console" type="button">Show Console</button>
         </div>
         <ul id="queue-list"></ul>
       </section>
 
-      <section id="console-panel" class="panel console-panel" hidden>
-        <h2>Process Console</h2>
-        <pre id="console-output" aria-live="polite"></pre>
-      </section>
-
       <section class="panel settings">
         <h2>Settings</h2>
-        <form id="settings-form">
+        <form id="settings-form" novalidate>
           <label>
             Output directory
-            <input id="output-directory" name="outputDirectory" type="text" />
-          </label>
-          <label>
-            Language
-            <input id="language" name="language" type="text" />
+            <div class="output-directory-control">
+              <input id="output-directory" name="outputDirectory" type="text" readonly />
+              <button id="pick-output-directory" type="button">Choose Folder</button>
+            </div>
           </label>
           <label>
             Model
@@ -74,7 +73,6 @@
             <input id="format-json" name="json" type="checkbox" />
             JSON output
           </label>
-          <button type="submit">Save settings</button>
         </form>
       </section>
     </main>
