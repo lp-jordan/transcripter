@@ -19,7 +19,7 @@ type WorkerEvents = {
 export class ProcessorClient extends EventEmitter<WorkerEvents> {
   private worker: ChildProcess;
 
-  constructor(ffmpegPath: string) {
+  constructor(ffmpegPath: string, whisperPath: string) {
     super();
 
     const workerPath = path.join(__dirname, 'processing-worker.js');
@@ -27,7 +27,8 @@ export class ProcessorClient extends EventEmitter<WorkerEvents> {
       stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
       env: {
         ...process.env,
-        TRANSCRIPTER_FFMPEG_PATH: ffmpegPath
+        TRANSCRIPTER_FFMPEG_PATH: ffmpegPath,
+        TRANSCRIPTER_WHISPER_PATH: whisperPath
       }
     });
 

@@ -1,6 +1,7 @@
 import { createInterface } from 'node:readline';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { constants as fsConstants } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
@@ -14,6 +15,7 @@ import type {
 const canceledJobs = new Set<string>();
 const activeProcesses = new Map<string, ChildProcessWithoutNullStreams>();
 const ffmpegPath = process.env.TRANSCRIPTER_FFMPEG_PATH;
+const whisperPath = process.env.TRANSCRIPTER_WHISPER_PATH;
 
 const postMessage = (message: WorkerOutboundMessage) => {
   if (typeof process.send === 'function') {
@@ -73,7 +75,7 @@ const runChildProcess = async (jobId: string, command: string, args: string[], o
 
     child.on('error', (error) => {
       activeProcesses.delete(jobId);
-      reject(error);
+      reject(new Error(`Failed to run command: ${command} ${args.join(' ')} (${error.message})`));
     });
 
     child.on('close', (code) => {
@@ -83,9 +85,23 @@ const runChildProcess = async (jobId: string, command: string, args: string[], o
         return;
       }
 
-      reject(new Error(`${command} exited with code ${code}`));
+      reject(new Error(`Command failed: ${command} ${args.join(' ')} (exit code ${code})`));
     });
   });
+
+const resolveWhisperCommand = async (): Promise<string> => {
+  if (!whisperPath || !path.isAbsolute(whisperPath)) {
+    throw new Error('Whisper executable path is not configured. Set TRANSCRIPTER_WHISPER_PATH to an absolute path.');
+  }
+
+  try {
+    await fs.access(whisperPath, fsConstants.R_OK | fsConstants.X_OK);
+  } catch {
+    throw new Error(`Whisper executable not found. Install/bundle whisper runtime. Expected path: ${whisperPath}`);
+  }
+
+  return whisperPath;
+};
 
 const extractAudio = async (job: ProcessingJob, tempDir: string): Promise<string> => {
   const outputWavPath = path.join(tempDir, `${job.id}.wav`);
@@ -131,6 +147,7 @@ const extractAudio = async (job: ProcessingJob, tempDir: string): Promise<string
 };
 
 const transcribeAudio = async (job: ProcessingJob, wavPath: string, tempDir: string): Promise<{ transcriptText: string; segments: Segment[] }> => {
+  const whisperCommand = await resolveWhisperCommand();
   const whisperOutputPath = path.join(tempDir, `${job.id}.json`);
 
   postMessage({
@@ -162,7 +179,7 @@ const transcribeAudio = async (job: ProcessingJob, wavPath: string, tempDir: str
   }
 
   let lastProgress = 0;
-  await runChildProcess(job.id, 'whisper', args, (line) => {
+  await runChildProcess(job.id, whisperCommand, args, (line) => {
     const parsedProgress = parseWhisperProgress(line);
     if (parsedProgress === null || parsedProgress <= lastProgress) {
       return;
