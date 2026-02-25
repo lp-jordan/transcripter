@@ -25,12 +25,29 @@
       <section class="panel">
         <h2>Queue</h2>
         <div class="controls">
-          <button id="add-files" type="button">Add Files</button>
-          <button id="remove-selected" type="button">Remove Selected</button>
-          <button id="clear-completed" type="button">Clear Completed</button>
-          <button id="start-queue" type="button">Start</button>
-          <button id="cancel-current" type="button">Cancel Current</button>
-          <button id="pause-queue" type="button" hidden>Pause</button>
+          <div class="controls-primary">
+            <button id="queue-primary" class="button-primary" type="button">Start</button>
+          </div>
+          <div class="controls-secondary">
+            <button id="add-files" class="button-secondary" type="button">Add Files</button>
+            <button id="cancel-current" class="button-secondary" type="button">Cancel Current</button>
+          </div>
+          <div class="controls-tertiary">
+            <button
+              id="overflow-trigger"
+              class="button-tertiary"
+              type="button"
+              aria-haspopup="true"
+              aria-expanded="false"
+              aria-controls="overflow-menu"
+            >
+              More ▾
+            </button>
+            <div id="overflow-menu" class="overflow-menu" role="menu" hidden>
+              <button id="remove-selected" class="overflow-item" type="button" role="menuitem">Remove Selected</button>
+              <button id="clear-completed" class="overflow-item" type="button" role="menuitem">Clear Completed</button>
+            </div>
+          </div>
         </div>
         <ul id="queue-list"></ul>
       </section>

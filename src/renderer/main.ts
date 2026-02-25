@@ -16,9 +16,10 @@ const jsonOutputCheckbox = document.getElementById('format-json') as HTMLInputEl
 const addFilesButton = document.getElementById('add-files') as HTMLButtonElement;
 const removeSelectedButton = document.getElementById('remove-selected') as HTMLButtonElement;
 const clearCompletedButton = document.getElementById('clear-completed') as HTMLButtonElement;
-const startQueueButton = document.getElementById('start-queue') as HTMLButtonElement;
+const queuePrimaryButton = document.getElementById('queue-primary') as HTMLButtonElement;
 const cancelCurrentButton = document.getElementById('cancel-current') as HTMLButtonElement;
-const pauseQueueButton = document.getElementById('pause-queue') as HTMLButtonElement;
+const overflowTriggerButton = document.getElementById('overflow-trigger') as HTMLButtonElement;
+const overflowMenu = document.getElementById('overflow-menu') as HTMLDivElement;
 const toggleConsoleButton = document.getElementById('toggle-console') as HTMLButtonElement;
 const consolePanel = document.getElementById('console-panel') as HTMLElement;
 const consoleOutput = document.getElementById('console-output') as HTMLPreElement;
@@ -60,12 +61,24 @@ const fileUrlToPath = (value: string): string | null => {
 };
 
 const updateButtons = () => {
+  const hasPendingItems = queueState.items.some((item) => item.status === 'pending');
+  const canProcessQueue = queueState.hasRunningJob || hasPendingItems;
+
   removeSelectedButton.disabled = selectedIds.size === 0;
+  clearCompletedButton.disabled = queueState.items.every((item) => item.status !== 'done');
   cancelCurrentButton.disabled = !queueState.hasRunningJob;
-  startQueueButton.disabled = queueState.hasRunningJob || queueState.items.every((item) => item.status !== 'pending');
-  pauseQueueButton.hidden = false;
-  pauseQueueButton.disabled = !queueState.hasRunningJob && queueState.items.every((item) => item.status !== 'pending');
-  pauseQueueButton.textContent = queueState.isPaused ? 'Resume' : 'Pause';
+
+  queuePrimaryButton.disabled = !canProcessQueue;
+  if (queueState.hasRunningJob) {
+    queuePrimaryButton.textContent = queueState.isPaused ? 'Resume' : 'Pause';
+  } else {
+    queuePrimaryButton.textContent = 'Start';
+  }
+};
+
+const setOverflowMenuOpen = (isOpen: boolean) => {
+  overflowMenu.hidden = !isOpen;
+  overflowTriggerButton.setAttribute('aria-expanded', String(isOpen));
 };
 
 const formatLogEntry = (entry: AppLogEntry): string => {
@@ -253,7 +266,17 @@ clearCompletedButton.addEventListener('click', async () => {
   await window.transcripter.queue.clearCompleted();
 });
 
-startQueueButton.addEventListener('click', async () => {
+queuePrimaryButton.addEventListener('click', async () => {
+  if (queueState.hasRunningJob) {
+    if (queueState.isPaused) {
+      await window.transcripter.queue.resume();
+      return;
+    }
+
+    await window.transcripter.queue.pause();
+    return;
+  }
+
   const result = await window.transcripter.queue.start();
   if (!result.ok && result.error) {
     window.alert(result.error);
@@ -264,13 +287,30 @@ cancelCurrentButton.addEventListener('click', async () => {
   await window.transcripter.queue.cancelCurrent();
 });
 
-pauseQueueButton.addEventListener('click', async () => {
-  if (queueState.isPaused) {
-    await window.transcripter.queue.resume();
+overflowTriggerButton.addEventListener('click', () => {
+  setOverflowMenuOpen(overflowMenu.hidden);
+});
+
+document.addEventListener('click', (event) => {
+  if (!(event.target instanceof Node)) {
     return;
   }
 
-  await window.transcripter.queue.pause();
+  if (overflowMenu.hidden) {
+    return;
+  }
+
+  if (!overflowMenu.contains(event.target) && !overflowTriggerButton.contains(event.target)) {
+    setOverflowMenuOpen(false);
+  }
+});
+
+removeSelectedButton.addEventListener('click', () => {
+  setOverflowMenuOpen(false);
+});
+
+clearCompletedButton.addEventListener('click', () => {
+  setOverflowMenuOpen(false);
 });
 
 toggleConsoleButton.addEventListener('click', () => {
