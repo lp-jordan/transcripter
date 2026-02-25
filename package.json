@@ -60,7 +60,18 @@
           ]
         }
       ],
-      "category": "public.app-category.productivity"
+      "category": "public.app-category.productivity",
+      "extraResources": [
+        {
+          "from": "node_modules/nodejs-whisper/cpp/whisper.cpp",
+          "to": "whisper-runtime",
+          "filter": [
+            "main",
+            "whisper",
+            "*.dylib"
+          ]
+        }
+      ]
     },
     "win": {
       "target": [
@@ -78,6 +89,17 @@
             "arm64"
           ]
         }
+      ],
+      "extraResources": [
+        {
+          "from": "node_modules/nodejs-whisper/cpp/whisper.cpp",
+          "to": "whisper-runtime",
+          "filter": [
+            "main.exe",
+            "whisper.exe",
+            "*.dll"
+          ]
+        }
       ]
     },
     "nsis": {
@@ -90,7 +112,8 @@
         "from": "node_modules/ffmpeg-static",
         "to": "ffmpeg",
         "filter": [
-          "ffmpeg*",
+          "ffmpeg",
+          "ffmpeg.exe",
           "LICENSE*"
         ]
       },
@@ -98,10 +121,40 @@
         "from": "node_modules/nodejs-whisper/cpp/whisper.cpp/models",
         "to": "whisper-models",
         "filter": [
-          "ggml-base.bin"
+          "ggml-*.bin"
         ]
       }
-    ]
+    ],
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "tar.gz",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "category": "Utility",
+      "extraResources": [
+        {
+          "from": "node_modules/nodejs-whisper/cpp/whisper.cpp",
+          "to": "whisper-runtime",
+          "filter": [
+            "main",
+            "whisper",
+            "*.so*"
+          ]
+        }
+      ]
+    }
   },
   "dependencies": {
     "ffmpeg-static": "^5.2.0",
