@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Transcripter</title>
+  </head>
+  <body>
+    <main class="layout">
+      <header>
+        <h1>Transcripter Queue</h1>
+      </header>
+
+      <section id="drop-zone" class="drop-zone">
+        <p>Drag and drop files here to add to the queue.</p>
+      </section>
+
+      <section class="panel">
+        <h2>Queue</h2>
+        <ul id="queue-list"></ul>
+      </section>
+
+      <section class="panel settings">
+        <h2>Settings</h2>
+        <form id="settings-form">
+          <label>
+            Output directory
+            <input id="output-directory" name="outputDirectory" type="text" />
+          </label>
+          <label>
+            Language
+            <input id="language" name="language" type="text" />
+          </label>
+          <button type="submit">Save settings</button>
+        </form>
+      </section>
+    </main>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

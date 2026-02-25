@@ -1,0 +1,35 @@
+# Ignore node modules and build files
+node_modules/
+dist/
+build/*
+!build/icons/
+!build/icons/README.md
+out/
+release/
+*.log
+*.tmp
+*.bak
+
+# Electron-specific
+*.asar
+electron/dist/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Env and IDE config
+.env
+.vscode/
+.idea/
+
+# Git and BFG cleanup reports
+.git/
+.bfg-report/
+
+# Optional: Ignore local project scripts/documents if needed
+LeaderPrompt/projects/
+# Ignore font binaries
+public/fonts/*.otf
+
+bfg.jar
