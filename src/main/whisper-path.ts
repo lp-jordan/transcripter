@@ -7,6 +7,12 @@ const whisperExecutableNames = process.platform === 'win32'
   ? ['main.exe', 'whisper.exe']
   : ['main', 'whisper'];
 
+type RuntimePathResolution = {
+  resolvedPath: string;
+  candidates: string[];
+  mode: 'packaged' | 'dev';
+};
+
 const findExistingPath = (candidates: string[]): string | null => {
   for (const candidate of candidates) {
     if (!path.isAbsolute(candidate)) {
@@ -29,27 +35,48 @@ const modelFileNameByModel: Record<WhisperModel, string> = {
 
 export const getWhisperModelFileName = (model: WhisperModel): string => modelFileNameByModel[model];
 
-export const resolveWhisperPath = (): string => {
-  const packagedCandidates = whisperExecutableNames.flatMap((executableName) => [
-    path.join(process.resourcesPath, 'whisper-runtime', executableName),
-    path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'nodejs-whisper', 'cpp', 'whisper.cpp', executableName)
-  ]);
+const getPackagedRuntimeCandidates = (): string[] => whisperExecutableNames.map(
+  (executableName) => path.join(process.resourcesPath, 'whisper-runtime', executableName)
+);
 
+const getDevRuntimeCandidates = (appPath: string): string[] => whisperExecutableNames.flatMap((executableName) => [
+  path.join(appPath, 'runtime', 'whisper-runtime', executableName),
+  path.join(appPath, 'node_modules', 'nodejs-whisper', 'cpp', 'whisper.cpp', executableName)
+]);
+
+export const resolveWhisperPathWithMeta = (): RuntimePathResolution => {
   const appPath = app.getAppPath();
-  const devCandidates = whisperExecutableNames.flatMap((executableName) => [
-    path.join(appPath, 'node_modules', 'nodejs-whisper', 'cpp', 'whisper.cpp', executableName)
-  ]);
+  const mode: RuntimePathResolution['mode'] = app.isPackaged ? 'packaged' : 'dev';
+  const candidates = mode === 'packaged'
+    ? getPackagedRuntimeCandidates()
+    : getDevRuntimeCandidates(appPath);
 
-  return findExistingPath([...packagedCandidates, ...devCandidates]) ?? packagedCandidates[0];
+  const resolvedPath = findExistingPath(candidates) ?? candidates[0];
+
+  return { resolvedPath, candidates, mode };
 };
 
-export const resolveWhisperModelDirectory = (): string => {
-  const appPath = app.getAppPath();
-  const candidates = [
-    path.join(process.resourcesPath, 'whisper-models'),
-    path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'nodejs-whisper', 'cpp', 'whisper.cpp', 'models'),
-    path.join(appPath, 'node_modules', 'nodejs-whisper', 'cpp', 'whisper.cpp', 'models')
-  ];
+export const resolveWhisperPath = (): string => resolveWhisperPathWithMeta().resolvedPath;
 
-  return findExistingPath(candidates) ?? candidates[0];
+const getPackagedModelCandidates = (): string[] => [
+  path.join(process.resourcesPath, 'whisper-models')
+];
+
+const getDevModelCandidates = (appPath: string): string[] => [
+  path.join(appPath, 'runtime', 'whisper-models'),
+  path.join(appPath, 'node_modules', 'nodejs-whisper', 'cpp', 'whisper.cpp', 'models')
+];
+
+export const resolveWhisperModelDirectoryWithMeta = (): RuntimePathResolution => {
+  const appPath = app.getAppPath();
+  const mode: RuntimePathResolution['mode'] = app.isPackaged ? 'packaged' : 'dev';
+  const candidates = mode === 'packaged'
+    ? getPackagedModelCandidates()
+    : getDevModelCandidates(appPath);
+
+  const resolvedPath = findExistingPath(candidates) ?? candidates[0];
+
+  return { resolvedPath, candidates, mode };
 };
+
+export const resolveWhisperModelDirectory = (): string => resolveWhisperModelDirectoryWithMeta().resolvedPath;
