@@ -64,11 +64,36 @@ export class ProcessorClient extends EventEmitter<WorkerEvents> {
   }
 
   async validateRuntime(model: WhisperModel): Promise<void> {
-    await fs.access(this.ffmpegPath, fsConstants.R_OK | fsConstants.X_OK);
-    await fs.access(this.whisperPath, fsConstants.R_OK | fsConstants.X_OK);
+    const failures: string[] = [];
+
+    try {
+      await fs.access(this.ffmpegPath, fsConstants.R_OK | fsConstants.X_OK);
+    } catch {
+      failures.push(`FFmpeg executable is missing or not executable at: ${this.ffmpegPath}`);
+    }
+
+    try {
+      await fs.access(this.whisperPath, fsConstants.R_OK | fsConstants.X_OK);
+    } catch {
+      failures.push(`whisper.cpp executable is missing or not executable at: ${this.whisperPath}`);
+    }
+
+    try {
+      await fs.access(this.whisperModelDirectory, fsConstants.R_OK);
+    } catch {
+      failures.push(`Whisper model directory is missing or unreadable at: ${this.whisperModelDirectory}`);
+    }
 
     const modelPath = path.join(this.whisperModelDirectory, getWhisperModelFileName(model));
-    await fs.access(modelPath, fsConstants.R_OK);
+    try {
+      await fs.access(modelPath, fsConstants.R_OK);
+    } catch {
+      failures.push(`Whisper model file for "${model}" is missing at: ${modelPath}`);
+    }
+
+    if (failures.length > 0) {
+      throw new Error(failures.join(' | '));
+    }
   }
 
   run(job: ProcessingJob): void {

@@ -60,18 +60,7 @@
           ]
         }
       ],
-      "category": "public.app-category.productivity",
-      "extraResources": [
-        {
-          "from": "node_modules/nodejs-whisper/cpp/whisper.cpp",
-          "to": "whisper-runtime",
-          "filter": [
-            "main",
-            "whisper",
-            "*.dylib"
-          ]
-        }
-      ]
+      "category": "public.app-category.productivity"
     },
     "win": {
       "target": [
@@ -87,17 +76,6 @@
           "arch": [
             "x64",
             "arm64"
-          ]
-        }
-      ],
-      "extraResources": [
-        {
-          "from": "node_modules/nodejs-whisper/cpp/whisper.cpp",
-          "to": "whisper-runtime",
-          "filter": [
-            "main.exe",
-            "whisper.exe",
-            "*.dll"
           ]
         }
       ]
@@ -118,7 +96,14 @@
         ]
       },
       {
-        "from": "node_modules/nodejs-whisper/cpp/whisper.cpp/models",
+        "from": "runtime/whisper-runtime",
+        "to": "whisper-runtime",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "runtime/whisper-models",
         "to": "whisper-models",
         "filter": [
           "ggml-*.bin"
@@ -142,18 +127,7 @@
           ]
         }
       ],
-      "category": "Utility",
-      "extraResources": [
-        {
-          "from": "node_modules/nodejs-whisper/cpp/whisper.cpp",
-          "to": "whisper-runtime",
-          "filter": [
-            "main",
-            "whisper",
-            "*.so*"
-          ]
-        }
-      ]
+      "category": "Utility"
     }
   },
   "dependencies": {
