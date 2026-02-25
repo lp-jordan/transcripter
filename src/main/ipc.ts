@@ -3,18 +3,10 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { resolveFfmpegPathWithMeta } from './ffmpeg-path';
-import { ProcessorClient } from './processor-client';
-import { resolveWhisperModelDirectoryWithMeta, resolveWhisperPathWithMeta } from './whisper-path';
 import { writeSelectedOutputs } from './output/writers';
-import type { AppSettings, OutputOptions, ProcessingJob, QueueItem } from './types';
-
-type LogLevel = 'info' | 'error';
-
-type AppLogEntry = {
-  timestamp: string;
-  level: LogLevel;
-  message: string;
-};
+import { ProcessorClient } from './processor-client';
+import type { AppLogEntry, AppSettings, OutputOptions, ProcessingJob, QueueItem, WhisperModel } from './types';
+import { resolveWhisperModelDirectoryWithMeta, resolveWhisperPathWithMeta } from './whisper-path';
 
 const settingsPath = path.join(app.getPath('userData'), 'settings.json');
 const defaultSettings: AppSettings = {
@@ -28,7 +20,8 @@ const defaultSettings: AppSettings = {
     vtt: false,
     json: true
   },
-  overwritePolicy: 'overwrite'
+  overwritePolicy: 'overwrite',
+  writeRunLog: false
 };
 
 const queue: QueueItem[] = [];
@@ -41,20 +34,68 @@ let activeJobId: string | null = null;
 let queuePaused = false;
 const appLogs: AppLogEntry[] = [];
 
-const appendLog = (message: string, level: LogLevel = 'info') => {
-  const entry: AppLogEntry = {
+type RunSummary = {
+  runId: string;
+  startedAt: string;
+  completedAt?: string;
+  total: number;
+  done: number;
+  failed: number;
+  canceled: number;
+  writeRunLog: boolean;
+  logOutputDirectory: string;
+  fatalError?: string;
+};
+
+let activeRun: RunSummary | null = null;
+
+const isWhisperModel = (value: unknown): value is WhisperModel => ['tiny', 'base', 'small'].includes(String(value));
+
+const sanitizeOutputOptions = (value: unknown): OutputOptions => {
+  const options = value && typeof value === 'object' ? (value as Partial<OutputOptions>) : {};
+  return {
+    txt: typeof options.txt === 'boolean' ? options.txt : defaultSettings.outputOptions.txt,
+    timecodedTxt:
+      typeof options.timecodedTxt === 'boolean' ? options.timecodedTxt : defaultSettings.outputOptions.timecodedTxt,
+    srt: typeof options.srt === 'boolean' ? options.srt : defaultSettings.outputOptions.srt,
+    vtt: typeof options.vtt === 'boolean' ? options.vtt : defaultSettings.outputOptions.vtt,
+    json: typeof options.json === 'boolean' ? options.json : defaultSettings.outputOptions.json
+  };
+};
+
+const sanitizeSettings = (value: unknown): AppSettings => {
+  const candidate = value && typeof value === 'object' ? (value as Partial<AppSettings>) : {};
+  const outputDirectory =
+    typeof candidate.outputDirectory === 'string' && candidate.outputDirectory.trim().length > 0
+      ? path.resolve(candidate.outputDirectory)
+      : defaultSettings.outputDirectory;
+
+  return {
+    outputDirectory,
+    language:
+      typeof candidate.language === 'string' && candidate.language.trim().length > 0
+        ? candidate.language.trim()
+        : defaultSettings.language,
+    model: isWhisperModel(candidate.model) ? candidate.model : defaultSettings.model,
+    outputOptions: sanitizeOutputOptions(candidate.outputOptions),
+    overwritePolicy: candidate.overwritePolicy === 'skip-existing' ? 'skip-existing' : defaultSettings.overwritePolicy,
+    writeRunLog: typeof candidate.writeRunLog === 'boolean' ? candidate.writeRunLog : defaultSettings.writeRunLog
+  };
+};
+
+const appendLog = (entry: Omit<AppLogEntry, 'timestamp'>) => {
+  const withTimestamp: AppLogEntry = {
     timestamp: new Date().toISOString(),
-    level,
-    message
+    ...entry
   };
 
-  appLogs.push(entry);
-  if (appLogs.length > 200) {
-    appLogs.splice(0, appLogs.length - 200);
+  appLogs.push(withTimestamp);
+  if (appLogs.length > 500) {
+    appLogs.splice(0, appLogs.length - 500);
   }
 
   for (const window of BrowserWindow.getAllWindows()) {
-    window.webContents.send('app-log:entry', entry);
+    window.webContents.send('app-log:entry', withTimestamp);
   }
 };
 
@@ -63,18 +104,10 @@ const withSafePath = async (inputPath: string): Promise<string> => path.resolve(
 const readSettings = async (): Promise<AppSettings> => {
   try {
     const raw = await fs.readFile(settingsPath, 'utf8');
-    const parsed = JSON.parse(raw) as Partial<AppSettings>;
-    return {
-      ...defaultSettings,
-      ...parsed,
-      outputOptions: {
-        ...defaultSettings.outputOptions,
-        ...(parsed.outputOptions ?? {})
-      },
-      overwritePolicy: parsed.overwritePolicy ?? defaultSettings.overwritePolicy
-    };
+    const parsed = JSON.parse(raw) as unknown;
+    return sanitizeSettings(parsed);
   } catch {
-    return defaultSettings;
+    return { ...defaultSettings };
   }
 };
 
@@ -93,20 +126,111 @@ const emitQueueState = () => {
 
 const persistSettings = async (next: Partial<AppSettings>) => {
   const current = await readSettings();
-  const merged: AppSettings = {
+  const merged = sanitizeSettings({
     ...current,
     ...next,
     outputOptions: {
       ...current.outputOptions,
       ...(next.outputOptions ?? {})
     }
-  };
+  });
 
   await fs.mkdir(path.dirname(settingsPath), { recursive: true });
   await fs.writeFile(settingsPath, JSON.stringify(merged, null, 2), 'utf8');
   return merged;
 };
 
+const writeRunLogFile = async (summary: RunSummary): Promise<void> => {
+  if (!summary.writeRunLog) {
+    return;
+  }
+
+  const lines: string[] = [];
+  lines.push(`Run ID: ${summary.runId}`);
+  lines.push(`Started: ${summary.startedAt}`);
+  lines.push(`Completed: ${summary.completedAt ?? new Date().toISOString()}`);
+  lines.push(`Total: ${summary.total}`);
+  lines.push(`Completed: ${summary.done}`);
+  lines.push(`Failed: ${summary.failed}`);
+  lines.push(`Canceled: ${summary.canceled}`);
+  if (summary.fatalError) {
+    lines.push(`Fatal Error: ${summary.fatalError}`);
+  }
+  lines.push('');
+  lines.push('Entries:');
+
+  for (const entry of appLogs) {
+    const contextParts = [`event=${entry.event}`];
+    if (entry.jobId) {
+      contextParts.push(`jobId=${entry.jobId}`);
+    }
+    if (entry.filePath) {
+      contextParts.push(`file=${entry.filePath}`);
+    }
+
+    lines.push(`${entry.timestamp} [${entry.level}] ${contextParts.join(' ')} ${entry.message}`);
+  }
+
+  const logPath = path.join(summary.logOutputDirectory, 'transcribe_log.txt');
+  await fs.mkdir(summary.logOutputDirectory, { recursive: true });
+  await fs.writeFile(logPath, `${lines.join('\n')}\n`, 'utf8');
+  appendLog({
+    level: 'info',
+    event: 'run.log_written',
+    message: `Wrote transcribe_log.txt to ${summary.logOutputDirectory}`
+  });
+};
+
+const finalizeRunIfComplete = async () => {
+  if (!activeRun || activeJobId || findNextPending()) {
+    return;
+  }
+
+  activeRun.completedAt = new Date().toISOString();
+  const summary = activeRun;
+  appendLog({
+    level: summary.fatalError ? 'error' : 'info',
+    event: 'run.complete',
+    message: `Run complete. total=${summary.total} done=${summary.done} failed=${summary.failed} canceled=${summary.canceled}${
+      summary.fatalError ? ` fatal=${summary.fatalError}` : ''
+    }`
+  });
+
+  try {
+    await writeRunLogFile(summary);
+  } catch (error) {
+    appendLog({
+      level: 'error',
+      event: 'run.log_write_failed',
+      message: `Failed to write transcribe_log.txt: ${error instanceof Error ? error.message : String(error)}`
+    });
+  }
+
+  activeRun = null;
+};
+
+
+const failPendingJobsForFatalError = (fatalError: string) => {
+  for (const item of queue) {
+    if (item.status !== 'pending') {
+      continue;
+    }
+
+    item.status = 'failed';
+    item.progress = 0;
+    item.error = fatalError;
+    if (activeRun) {
+      activeRun.failed += 1;
+    }
+    appendLog({
+      level: 'error',
+      event: 'job.failed_fatal_init',
+      jobId: item.id,
+      filePath: item.sourcePath,
+      message: `Failed ${path.basename(item.sourcePath)} due to fatal initialization error: ${fatalError}`
+    });
+  }
+};
 
 const runtimeValidationByModel = new Map<ProcessingJob['model'], string | null>();
 let runtimeValidationErrorShown = false;
@@ -141,9 +265,13 @@ const validateRuntimeForModel = async (model: ProcessingJob['model']): Promise<s
 void (async () => {
   const runtimeError = await validateRuntimeForModel(defaultSettings.model);
   if (runtimeError) {
-    appendLog(runtimeError, 'error');
+    appendLog({ level: 'error', event: 'runtime.invalid', message: runtimeError });
   } else {
-    appendLog(`Runtime check passed (${ffmpegRuntime.mode} mode): FFmpeg, whisper.cpp, and model files were detected.`);
+    appendLog({
+      level: 'info',
+      event: 'runtime.ready',
+      message: `Runtime check passed (${ffmpegRuntime.mode} mode): FFmpeg, whisper.cpp, and model files were detected.`
+    });
   }
 })();
 
@@ -166,22 +294,41 @@ const processNextPending = async () => {
   const next = findNextPending();
   if (!next) {
     emitQueueState();
+    await finalizeRunIfComplete();
     return;
   }
 
   activeJobId = next.id;
-  appendLog(`Started processing ${path.basename(next.sourcePath)} (${next.id}).`);
+  appendLog({
+    level: 'info',
+    event: 'job.started',
+    jobId: next.id,
+    filePath: next.sourcePath,
+    message: `Started processing ${path.basename(next.sourcePath)}.`
+  });
   const runtimeError = await validateRuntimeForModel(next.model);
   if (runtimeError) {
     activeJobId = null;
     queuePaused = true;
+    if (activeRun) {
+      activeRun.fatalError = runtimeError;
+    }
+
+    failPendingJobsForFatalError(runtimeError);
 
     if (!runtimeValidationErrorShown) {
-      appendLog(runtimeError, 'error');
+      appendLog({
+        level: 'error',
+        event: 'runtime.invalid',
+        jobId: next.id,
+        filePath: next.sourcePath,
+        message: runtimeError
+      });
       runtimeValidationErrorShown = true;
     }
 
     emitQueueState();
+    await finalizeRunIfComplete();
     return;
   }
 
@@ -228,13 +375,31 @@ processor.on('complete', async (payload) => {
     item.status = 'done';
     item.progress = 100;
     item.error = undefined;
+    if (activeRun) {
+      activeRun.done += 1;
+    }
 
-    appendLog(`Completed ${path.basename(item.sourcePath)}. Wrote ${outputFiles.length} output file(s).`);
+    appendLog({
+      level: 'info',
+      event: 'job.completed',
+      jobId: item.id,
+      filePath: item.sourcePath,
+      message: `Completed ${path.basename(item.sourcePath)}. Wrote ${outputFiles.length} output file(s).`
+    });
   } catch (error) {
     item.status = 'failed';
     item.progress = 0;
     item.error = error instanceof Error ? error.message : String(error);
-    appendLog(`Failed writing outputs for ${path.basename(item.sourcePath)}: ${item.error}`, 'error');
+    if (activeRun) {
+      activeRun.failed += 1;
+    }
+    appendLog({
+      level: 'error',
+      event: 'job.output_failed',
+      jobId: item.id,
+      filePath: item.sourcePath,
+      message: `Failed writing outputs for ${path.basename(item.sourcePath)}: ${item.error}`
+    });
   }
 
   activeJobId = null;
@@ -244,7 +409,7 @@ processor.on('complete', async (payload) => {
 
 processor.on('error', (payload) => {
   if (payload.jobId === 'worker') {
-    appendLog(`Worker error: ${payload.error}`, 'error');
+    appendLog({ level: 'error', event: 'worker.error', message: `Worker error: ${payload.error}` });
     return;
   }
 
@@ -256,12 +421,21 @@ processor.on('error', (payload) => {
   item.status = payload.canceled ? 'canceled' : 'failed';
   item.error = payload.error;
   item.progress = payload.canceled ? item.progress : 0;
-  appendLog(
-    payload.canceled
-      ? `Canceled ${path.basename(item.sourcePath)}.`
-      : `Failed ${path.basename(item.sourcePath)}: ${payload.error}`,
-    payload.canceled ? 'info' : 'error'
-  );
+  if (activeRun) {
+    if (payload.canceled) {
+      activeRun.canceled += 1;
+    } else {
+      activeRun.failed += 1;
+    }
+  }
+
+  appendLog({
+    level: payload.canceled ? 'info' : 'error',
+    event: payload.canceled ? 'job.canceled' : 'job.failed',
+    jobId: item.id,
+    filePath: item.sourcePath,
+    message: payload.canceled ? `Canceled ${path.basename(item.sourcePath)}.` : `Failed ${path.basename(item.sourcePath)}: ${payload.error}`
+  });
 
   if (activeJobId === payload.jobId) {
     activeJobId = null;
@@ -324,7 +498,7 @@ ipcMain.handle('queue:add', async (_event, sourcePaths: string[]) => {
   }
 
   emitQueueState();
-  appendLog(`Queued ${sourcePaths.length} file(s).`);
+  appendLog({ level: 'info', event: 'queue.added', message: `Queued ${sourcePaths.length} file(s).` });
   return { ok: true as const };
 });
 
@@ -355,21 +529,45 @@ ipcMain.handle('queue:clearCompleted', () => {
   queue.push(...next);
   emitQueueState();
   if (removedCount > 0) {
-    appendLog(`Cleared ${removedCount} completed queue item(s).`);
+    appendLog({ level: 'info', event: 'queue.cleared', message: `Cleared ${removedCount} completed queue item(s).` });
   }
   return { ok: true as const };
 });
 
 ipcMain.handle('queue:start', async () => {
   queuePaused = false;
-  appendLog('Queue start requested.');
+  const settings = await readSettings();
+
+  activeRun = {
+    runId: randomUUID(),
+    startedAt: new Date().toISOString(),
+    total: queue.filter((item) => item.status === 'pending').length,
+    done: 0,
+    failed: 0,
+    canceled: 0,
+    writeRunLog: Boolean(settings.writeRunLog),
+    logOutputDirectory: settings.outputDirectory
+  };
+
+  appendLog({ level: 'info', event: 'queue.started', message: 'Queue start requested.' });
 
   const firstPending = findNextPending();
   if (firstPending) {
     const runtimeError = await validateRuntimeForModel(firstPending.model);
     if (runtimeError) {
-      appendLog(runtimeError, 'error');
+      if (activeRun) {
+        activeRun.fatalError = runtimeError;
+      }
+      failPendingJobsForFatalError(runtimeError);
+      appendLog({
+        level: 'error',
+        event: 'runtime.invalid',
+        jobId: firstPending.id,
+        filePath: firstPending.sourcePath,
+        message: runtimeError
+      });
       emitQueueState();
+      await finalizeRunIfComplete();
       return { ok: false as const, error: runtimeError };
     }
   }
@@ -382,7 +580,7 @@ ipcMain.handle('queue:start', async () => {
 ipcMain.handle('queue:pause', () => {
   if (!queuePaused) {
     queuePaused = true;
-    appendLog('Queue paused. Current job will finish before processing stops.');
+    appendLog({ level: 'info', event: 'queue.paused', message: 'Queue paused. Current job will finish before processing stops.' });
     emitQueueState();
   }
 
@@ -392,7 +590,7 @@ ipcMain.handle('queue:pause', () => {
 ipcMain.handle('queue:resume', () => {
   if (queuePaused) {
     queuePaused = false;
-    appendLog('Queue resumed.');
+    appendLog({ level: 'info', event: 'queue.resumed', message: 'Queue resumed.' });
     void processNextPending();
     emitQueueState();
   }
@@ -405,7 +603,7 @@ ipcMain.handle('queue:cancelCurrent', () => {
     return { ok: true as const };
   }
 
-  appendLog(`Cancel requested for job ${activeJobId}.`);
+  appendLog({ level: 'info', event: 'job.cancel_requested', jobId: activeJobId, message: `Cancel requested for job ${activeJobId}.` });
   processor.cancel(activeJobId);
   return { ok: true as const };
 });

@@ -81,4 +81,16 @@ export type AppSettings = {
   model: WhisperModel;
   outputOptions: OutputOptions;
   overwritePolicy?: OverwritePolicy;
+  writeRunLog?: boolean;
+};
+
+export type LogLevel = 'info' | 'error';
+
+export type AppLogEntry = {
+  timestamp: string;
+  level: LogLevel;
+  event: string;
+  message: string;
+  jobId?: string;
+  filePath?: string;
 };
