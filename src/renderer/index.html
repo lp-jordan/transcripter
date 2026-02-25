@@ -24,8 +24,14 @@
           <button id="start-queue" type="button">Start</button>
           <button id="cancel-current" type="button">Cancel Current</button>
           <button id="pause-queue" type="button" hidden>Pause</button>
+          <button id="toggle-console" type="button">Show Console</button>
         </div>
         <ul id="queue-list"></ul>
+      </section>
+
+      <section id="console-panel" class="panel console-panel" hidden>
+        <h2>Process Console</h2>
+        <pre id="console-output" aria-live="polite"></pre>
       </section>
 
       <section class="panel settings">

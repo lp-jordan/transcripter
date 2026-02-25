@@ -6,6 +6,14 @@ import { ProcessorClient } from './processor-client';
 import { writeSelectedOutputs } from './output/writers';
 import type { AppSettings, OutputOptions, ProcessingJob, QueueItem } from './types';
 
+type LogLevel = 'info' | 'error';
+
+type AppLogEntry = {
+  timestamp: string;
+  level: LogLevel;
+  message: string;
+};
+
 const settingsPath = path.join(app.getPath('userData'), 'settings.json');
 const defaultSettings: AppSettings = {
   outputDirectory: app.getPath('documents'),
@@ -24,6 +32,24 @@ const defaultSettings: AppSettings = {
 const queue: QueueItem[] = [];
 const processor = new ProcessorClient();
 let activeJobId: string | null = null;
+const appLogs: AppLogEntry[] = [];
+
+const appendLog = (message: string, level: LogLevel = 'info') => {
+  const entry: AppLogEntry = {
+    timestamp: new Date().toISOString(),
+    level,
+    message
+  };
+
+  appLogs.push(entry);
+  if (appLogs.length > 200) {
+    appLogs.splice(0, appLogs.length - 200);
+  }
+
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send('app-log:entry', entry);
+  }
+};
 
 const withSafePath = async (inputPath: string): Promise<string> => path.resolve(inputPath);
 
@@ -96,6 +122,7 @@ const processNextPending = () => {
   }
 
   activeJobId = next.id;
+  appendLog(`Started processing ${path.basename(next.sourcePath)} (${next.id}).`);
   processor.run(queueItemToJob(next));
   emitQueueState();
 };
@@ -125,19 +152,28 @@ processor.on('complete', async (payload) => {
   const baseName = path.parse(item.sourcePath).name;
   const settings = await readSettings();
 
-  const outputFiles = await writeSelectedOutputs({
-    outputDirectory: outDir,
-    baseName,
-    outputOptions: item.outputOptions,
-    segments: payload.segments,
-    transcriptText: payload.transcriptText,
-    overwritePolicy: settings.overwritePolicy ?? 'overwrite'
-  });
+  try {
+    const outputFiles = await writeSelectedOutputs({
+      outputDirectory: outDir,
+      baseName,
+      outputOptions: item.outputOptions,
+      segments: payload.segments,
+      transcriptText: payload.transcriptText,
+      overwritePolicy: settings.overwritePolicy ?? 'overwrite'
+    });
 
-  item.outputFiles = outputFiles;
-  item.status = 'done';
-  item.progress = 100;
-  item.error = undefined;
+    item.outputFiles = outputFiles;
+    item.status = 'done';
+    item.progress = 100;
+    item.error = undefined;
+
+    appendLog(`Completed ${path.basename(item.sourcePath)}. Wrote ${outputFiles.length} output file(s).`);
+  } catch (error) {
+    item.status = 'failed';
+    item.progress = 0;
+    item.error = error instanceof Error ? error.message : String(error);
+    appendLog(`Failed writing outputs for ${path.basename(item.sourcePath)}: ${item.error}`, 'error');
+  }
 
   activeJobId = null;
   emitQueueState();
@@ -146,6 +182,7 @@ processor.on('complete', async (payload) => {
 
 processor.on('error', (payload) => {
   if (payload.jobId === 'worker') {
+    appendLog(`Worker error: ${payload.error}`, 'error');
     return;
   }
 
@@ -157,6 +194,12 @@ processor.on('error', (payload) => {
   item.status = payload.canceled ? 'canceled' : 'failed';
   item.error = payload.error;
   item.progress = payload.canceled ? item.progress : 0;
+  appendLog(
+    payload.canceled
+      ? `Canceled ${path.basename(item.sourcePath)}.`
+      : `Failed ${path.basename(item.sourcePath)}: ${payload.error}`,
+    payload.canceled ? 'info' : 'error'
+  );
 
   if (activeJobId === payload.jobId) {
     activeJobId = null;
@@ -184,6 +227,7 @@ ipcMain.handle('file:writeText', async (_event, filePath: string, content: strin
 
 ipcMain.handle('settings:get', () => readSettings());
 ipcMain.handle('settings:set', async (_event, next: Partial<AppSettings>) => persistSettings(next));
+ipcMain.handle('app-log:list', () => [...appLogs]);
 
 ipcMain.handle('queue:list', () => ({ items: [...queue], activeJobId, hasRunningJob: Boolean(activeJobId) }));
 
@@ -204,6 +248,7 @@ ipcMain.handle('queue:add', async (_event, sourcePaths: string[]) => {
   }
 
   emitQueueState();
+  appendLog(`Queued ${sourcePaths.length} file(s).`);
   return { ok: true as const };
 });
 
@@ -228,14 +273,19 @@ ipcMain.handle('queue:removeSelected', (_event, ids: string[]) => {
 });
 
 ipcMain.handle('queue:clearCompleted', () => {
+  const removedCount = queue.filter((item) => ['done', 'failed', 'canceled'].includes(item.status)).length;
   const next = queue.filter((item) => !['done', 'failed', 'canceled'].includes(item.status));
   queue.length = 0;
   queue.push(...next);
   emitQueueState();
+  if (removedCount > 0) {
+    appendLog(`Cleared ${removedCount} completed queue item(s).`);
+  }
   return { ok: true as const };
 });
 
 ipcMain.handle('queue:start', () => {
+  appendLog('Queue start requested.');
   processNextPending();
   return { ok: true as const };
 });
@@ -245,6 +295,7 @@ ipcMain.handle('queue:cancelCurrent', () => {
     return { ok: true as const };
   }
 
+  appendLog(`Cancel requested for job ${activeJobId}.`);
   processor.cancel(activeJobId);
   return { ok: true as const };
 });
