@@ -188,7 +188,10 @@ clearCompletedButton.addEventListener('click', async () => {
 });
 
 startQueueButton.addEventListener('click', async () => {
-  await window.transcripter.queue.start();
+  const result = await window.transcripter.queue.start();
+  if (!result.ok && result.error) {
+    window.alert(result.error);
+  }
 });
 
 cancelCurrentButton.addEventListener('click', async () => {

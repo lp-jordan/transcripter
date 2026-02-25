@@ -16,6 +16,7 @@ const canceledJobs = new Set<string>();
 const activeProcesses = new Map<string, ChildProcessWithoutNullStreams>();
 const ffmpegPath = process.env.TRANSCRIPTER_FFMPEG_PATH;
 const whisperPath = process.env.TRANSCRIPTER_WHISPER_PATH;
+const whisperModelDirectory = process.env.TRANSCRIPTER_WHISPER_MODEL_DIR;
 
 const postMessage = (message: WorkerOutboundMessage) => {
   if (typeof process.send === 'function') {
@@ -103,6 +104,35 @@ const resolveWhisperCommand = async (): Promise<string> => {
   return whisperPath;
 };
 
+
+const getModelFileName = (model: ProcessingJob['model']): string => {
+  if (model === 'tiny') {
+    return 'ggml-tiny.bin';
+  }
+
+  if (model === 'small') {
+    return 'ggml-small.bin';
+  }
+
+  return 'ggml-base.bin';
+};
+
+const resolveWhisperModelPath = async (job: ProcessingJob): Promise<string> => {
+  if (!whisperModelDirectory || !path.isAbsolute(whisperModelDirectory)) {
+    throw new Error('Whisper model directory is not configured. Set TRANSCRIPTER_WHISPER_MODEL_DIR to an absolute path.');
+  }
+
+  const modelPath = path.join(whisperModelDirectory, getModelFileName(job.model));
+
+  try {
+    await fs.access(modelPath, fsConstants.R_OK);
+  } catch {
+    throw new Error(`Whisper model file for "${job.model}" not found. Expected: ${modelPath}`);
+  }
+
+  return modelPath;
+};
+
 const extractAudio = async (job: ProcessingJob, tempDir: string): Promise<string> => {
   const outputWavPath = path.join(tempDir, `${job.id}.wav`);
   const command = ffmpegPath && path.isAbsolute(ffmpegPath) ? ffmpegPath : 'ffmpeg';
@@ -148,7 +178,9 @@ const extractAudio = async (job: ProcessingJob, tempDir: string): Promise<string
 
 const transcribeAudio = async (job: ProcessingJob, wavPath: string, tempDir: string): Promise<{ transcriptText: string; segments: Segment[] }> => {
   const whisperCommand = await resolveWhisperCommand();
-  const whisperOutputPath = path.join(tempDir, `${job.id}.json`);
+  const whisperModelPath = await resolveWhisperModelPath(job);
+  const whisperOutputPrefix = path.join(tempDir, job.id);
+  const whisperOutputPath = `${whisperOutputPrefix}.json`;
 
   postMessage({
     type: 'progress',
@@ -161,21 +193,17 @@ const transcribeAudio = async (job: ProcessingJob, wavPath: string, tempDir: str
   });
 
   const args = [
+    '-m',
+    whisperModelPath,
+    '-f',
     wavPath,
-    '--model',
-    job.model,
-    '--task',
-    'transcribe',
-    '--output_dir',
-    tempDir,
-    '--output_format',
-    'json',
-    '--verbose',
-    'True'
+    '-oj',
+    '-of',
+    whisperOutputPrefix
   ];
 
   if (job.language) {
-    args.push('--language', job.language);
+    args.push('-l', job.language);
   }
 
   let lastProgress = 0;
