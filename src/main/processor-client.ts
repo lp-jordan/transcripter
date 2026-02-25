@@ -1,11 +1,15 @@
 import { EventEmitter } from 'node:events';
+import { constants as fsConstants } from 'node:fs';
+import fs from 'node:fs/promises';
 import { fork, type ChildProcess } from 'node:child_process';
 import path from 'node:path';
+import { getWhisperModelFileName } from './whisper-path';
 import type {
   ProcessingCompleteEvent,
   ProcessingErrorEvent,
   ProcessingJob,
   ProcessingProgressEvent,
+  WhisperModel,
   WorkerInboundMessage,
   WorkerOutboundMessage
 } from './types';
@@ -19,7 +23,11 @@ type WorkerEvents = {
 export class ProcessorClient extends EventEmitter<WorkerEvents> {
   private worker: ChildProcess;
 
-  constructor(ffmpegPath: string, whisperPath: string) {
+  constructor(
+    private readonly ffmpegPath: string,
+    private readonly whisperPath: string,
+    private readonly whisperModelDirectory: string
+  ) {
     super();
 
     const workerPath = path.join(__dirname, 'processing-worker.js');
@@ -28,7 +36,8 @@ export class ProcessorClient extends EventEmitter<WorkerEvents> {
       env: {
         ...process.env,
         TRANSCRIPTER_FFMPEG_PATH: ffmpegPath,
-        TRANSCRIPTER_WHISPER_PATH: whisperPath
+        TRANSCRIPTER_WHISPER_PATH: whisperPath,
+        TRANSCRIPTER_WHISPER_MODEL_DIR: whisperModelDirectory
       }
     });
 
@@ -52,6 +61,14 @@ export class ProcessorClient extends EventEmitter<WorkerEvents> {
         error: 'Processing worker exited unexpectedly'
       });
     });
+  }
+
+  async validateRuntime(model: WhisperModel): Promise<void> {
+    await fs.access(this.ffmpegPath, fsConstants.R_OK | fsConstants.X_OK);
+    await fs.access(this.whisperPath, fsConstants.R_OK | fsConstants.X_OK);
+
+    const modelPath = path.join(this.whisperModelDirectory, getWhisperModelFileName(model));
+    await fs.access(modelPath, fsConstants.R_OK);
   }
 
   run(job: ProcessingJob): void {
