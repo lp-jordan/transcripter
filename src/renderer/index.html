@@ -71,6 +71,18 @@
             </select>
           </label>
           <label>
+            Language
+            <select id="language" name="language">
+              <option value="en">English (en)</option>
+              <option value="es">Spanish (es)</option>
+              <option value="fr">French (fr)</option>
+              <option value="de">German (de)</option>
+              <option value="it">Italian (it)</option>
+              <option value="pt">Portuguese (pt)</option>
+              <option value="auto">Auto detect</option>
+            </select>
+          </label>
+          <label>
             <input id="format-txt" name="txt" type="checkbox" />
             TXT output
           </label>
@@ -89,6 +101,10 @@
           <label>
             <input id="format-json" name="json" type="checkbox" />
             JSON output
+          </label>
+          <label>
+            <input id="write-run-log" name="writeRunLog" type="checkbox" />
+            Write transcribe_log.txt after each run
           </label>
         </form>
       </section>
