@@ -7,6 +7,8 @@ const settingsForm = document.getElementById('settings-form') as HTMLFormElement
 const outputDirectoryInput = document.getElementById('output-directory') as HTMLInputElement;
 const pickOutputDirectoryButton = document.getElementById('pick-output-directory') as HTMLButtonElement;
 const modelSelect = document.getElementById('model') as HTMLSelectElement;
+const languageSelect = document.getElementById('language') as HTMLSelectElement;
+const writeRunLogCheckbox = document.getElementById('write-run-log') as HTMLInputElement;
 const txtOutputCheckbox = document.getElementById('format-txt') as HTMLInputElement;
 const timecodedTxtOutputCheckbox = document.getElementById('format-timecoded-txt') as HTMLInputElement;
 const srtOutputCheckbox = document.getElementById('format-srt') as HTMLInputElement;
@@ -65,7 +67,7 @@ const updateButtons = () => {
   const canProcessQueue = queueState.hasRunningJob || hasPendingItems;
 
   removeSelectedButton.disabled = selectedIds.size === 0;
-  clearCompletedButton.disabled = queueState.items.every((item) => item.status !== 'done');
+  clearCompletedButton.disabled = queueState.items.every((item) => item.status !== 'done' && item.status !== 'failed');
   cancelCurrentButton.disabled = !queueState.hasRunningJob;
 
   queuePrimaryButton.disabled = !canProcessQueue;
@@ -84,7 +86,15 @@ const setOverflowMenuOpen = (isOpen: boolean) => {
 const formatLogEntry = (entry: AppLogEntry): string => {
   const time = new Date(entry.timestamp).toLocaleTimeString();
   const level = entry.level.toUpperCase().padEnd(5, ' ');
-  return `[${time}] ${level} ${entry.message}`;
+  const metaParts = [entry.event];
+  if (entry.jobId) {
+    metaParts.push(`job=${entry.jobId}`);
+  }
+  if (entry.filePath) {
+    const file = entry.filePath.split(/[/\\]/).pop() ?? entry.filePath;
+    metaParts.push(`file=${file}`);
+  }
+  return `[${time}] ${level} ${metaParts.join(' | ')} :: ${entry.message}`;
 };
 
 const renderConsole = () => {
@@ -175,7 +185,7 @@ const createQueueItem = (item: QueueState['items'][number]): HTMLLIElement => {
     .filter(([, enabled]) => enabled)
     .map(([name]) => name)
     .join(', ');
-  config.textContent = `Output: ${item.outputDirectory} | Model: ${item.model} | Language: English | Formats: ${formats}`;
+  config.textContent = `Output: ${item.outputDirectory} | Model: ${item.model} | Language: ${item.language} | Formats: ${formats}`;
 
   details.append(header, config);
 
@@ -236,11 +246,27 @@ const addFiles = async (paths: string[]) => {
   await window.transcripter.queue.add(paths);
 };
 
+const applySettingsToUi = (settings: Awaited<ReturnType<typeof window.transcripter.settings.get>>) => {
+  outputDirectoryInput.value = settings.outputDirectory;
+  modelSelect.value = settings.model;
+  languageSelect.value = settings.language;
+  if (languageSelect.value !== settings.language) {
+    languageSelect.value = 'en';
+  }
+  writeRunLogCheckbox.checked = Boolean(settings.writeRunLog);
+  txtOutputCheckbox.checked = settings.outputOptions.txt;
+  timecodedTxtOutputCheckbox.checked = settings.outputOptions.timecodedTxt;
+  srtOutputCheckbox.checked = settings.outputOptions.srt;
+  vttOutputCheckbox.checked = settings.outputOptions.vtt;
+  jsonOutputCheckbox.checked = settings.outputOptions.json;
+};
+
 const saveSettings = async () => {
   const saved = await window.transcripter.settings.set({
     outputDirectory: outputDirectoryInput.value,
-    language: 'en',
+    language: languageSelect.value,
     model: modelSelect.value as 'tiny' | 'base' | 'small',
+    writeRunLog: writeRunLogCheckbox.checked,
     outputOptions: {
       txt: txtOutputCheckbox.checked,
       timecodedTxt: timecodedTxtOutputCheckbox.checked,
@@ -250,13 +276,7 @@ const saveSettings = async () => {
     }
   });
 
-  outputDirectoryInput.value = saved.outputDirectory;
-  modelSelect.value = saved.model;
-  txtOutputCheckbox.checked = saved.outputOptions.txt;
-  timecodedTxtOutputCheckbox.checked = saved.outputOptions.timecodedTxt;
-  srtOutputCheckbox.checked = saved.outputOptions.srt;
-  vttOutputCheckbox.checked = saved.outputOptions.vtt;
-  jsonOutputCheckbox.checked = saved.outputOptions.json;
+  applySettingsToUi(saved);
 };
 
 dropZone.addEventListener('dragover', (event) => {
@@ -372,7 +392,16 @@ settingsForm.addEventListener('submit', (event) => {
   event.preventDefault();
 });
 
-for (const element of [modelSelect, txtOutputCheckbox, timecodedTxtOutputCheckbox, srtOutputCheckbox, vttOutputCheckbox, jsonOutputCheckbox]) {
+for (const element of [
+  modelSelect,
+  languageSelect,
+  writeRunLogCheckbox,
+  txtOutputCheckbox,
+  timecodedTxtOutputCheckbox,
+  srtOutputCheckbox,
+  vttOutputCheckbox,
+  jsonOutputCheckbox
+]) {
   element.addEventListener('change', () => {
     void saveSettings();
   });
@@ -380,13 +409,7 @@ for (const element of [modelSelect, txtOutputCheckbox, timecodedTxtOutputCheckbo
 
 const bootstrap = async () => {
   const settings = await window.transcripter.settings.get();
-  outputDirectoryInput.value = settings.outputDirectory;
-  modelSelect.value = settings.model;
-  txtOutputCheckbox.checked = settings.outputOptions.txt;
-  timecodedTxtOutputCheckbox.checked = settings.outputOptions.timecodedTxt;
-  srtOutputCheckbox.checked = settings.outputOptions.srt;
-  vttOutputCheckbox.checked = settings.outputOptions.vtt;
-  jsonOutputCheckbox.checked = settings.outputOptions.json;
+  applySettingsToUi(settings);
 
   const initialLogs = await window.transcripter.logs.list();
   appLogs.push(...initialLogs.slice(-MAX_CONSOLE_LINES));

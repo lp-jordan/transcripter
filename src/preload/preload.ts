@@ -1,17 +1,11 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { AppSettings, QueueItem } from '../main/types';
+import type { AppLogEntry, AppSettings, QueueItem } from '../main/types';
 
 export type QueueState = {
   items: QueueItem[];
   activeJobId: string | null;
   hasRunningJob: boolean;
   isPaused: boolean;
-};
-
-export type AppLogEntry = {
-  timestamp: string;
-  level: 'info' | 'error';
-  message: string;
 };
 
 const api = {
