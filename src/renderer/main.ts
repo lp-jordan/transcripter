@@ -114,6 +114,15 @@ const createQueueItem = (item: QueueState['items'][number]): HTMLLIElement => {
   const li = document.createElement('li');
   li.className = 'queue-item';
 
+  const details = document.createElement('div');
+  details.className = 'queue-item-details';
+
+  const header = document.createElement('div');
+  header.className = 'queue-item-header';
+
+  const title = document.createElement('label');
+  title.className = 'queue-item-title';
+
   const selector = document.createElement('input');
   selector.type = 'checkbox';
   selector.checked = selectedIds.has(item.id);
@@ -127,24 +136,28 @@ const createQueueItem = (item: QueueState['items'][number]): HTMLLIElement => {
     updateButtons();
   });
 
-  const details = document.createElement('div');
-  details.className = 'queue-item-details';
-
-  const status = document.createElement('strong');
-  status.textContent = `${formatStatusLabel(item.status)} • ${Math.round(item.progress)}%`;
-
   const source = document.createElement('span');
+  source.className = 'queue-item-source';
   source.textContent = getFileName(item.sourcePath);
   source.title = item.sourcePath;
 
+  title.append(selector, source);
+
+  const status = document.createElement('strong');
+  status.className = 'queue-item-status';
+  status.textContent = `${formatStatusLabel(item.status)} • ${Math.round(item.progress)}%`;
+
+  header.append(title, status);
+
   const config = document.createElement('small');
+  config.className = 'queue-item-meta';
   const formats = Object.entries(item.outputOptions)
     .filter(([, enabled]) => enabled)
     .map(([name]) => name)
     .join(', ');
   config.textContent = `Output: ${item.outputDirectory} | Model: ${item.model} | Language: English | Formats: ${formats}`;
 
-  details.append(status, source, config);
+  details.append(header, config);
 
   if (item.error) {
     const error = document.createElement('small');
@@ -166,7 +179,7 @@ const createQueueItem = (item: QueueState['items'][number]): HTMLLIElement => {
     actions.append(openOutput);
   }
 
-  li.append(selector, details, actions);
+  li.append(details, actions);
   return li;
 };
 
