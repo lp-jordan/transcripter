@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { resolveFfmpegPath } from './ffmpeg-path';
 import { ProcessorClient } from './processor-client';
+import { resolveWhisperPath } from './whisper-path';
 import { writeSelectedOutputs } from './output/writers';
 import type { AppSettings, OutputOptions, ProcessingJob, QueueItem } from './types';
 
@@ -31,7 +32,7 @@ const defaultSettings: AppSettings = {
 };
 
 const queue: QueueItem[] = [];
-const processor = new ProcessorClient(resolveFfmpegPath());
+const processor = new ProcessorClient(resolveFfmpegPath(), resolveWhisperPath());
 let activeJobId: string | null = null;
 let queuePaused = false;
 const appLogs: AppLogEntry[] = [];
