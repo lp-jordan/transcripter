@@ -7,6 +7,12 @@ export type QueueState = {
   hasRunningJob: boolean;
 };
 
+export type AppLogEntry = {
+  timestamp: string;
+  level: 'info' | 'error';
+  message: string;
+};
+
 const api = {
   file: {
     readText: (filePath: string) => ipcRenderer.invoke('file:readText', filePath),
@@ -32,6 +38,16 @@ const api = {
   settings: {
     get: (): Promise<AppSettings> => ipcRenderer.invoke('settings:get'),
     set: (next: Partial<AppSettings>): Promise<AppSettings> => ipcRenderer.invoke('settings:set', next)
+  },
+  logs: {
+    list: (): Promise<AppLogEntry[]> => ipcRenderer.invoke('app-log:list'),
+    onEntry: (listener: (entry: AppLogEntry) => void): (() => void) => {
+      const wrapped = (_event: unknown, payload: AppLogEntry) => listener(payload);
+      ipcRenderer.on('app-log:entry', wrapped);
+      return () => {
+        ipcRenderer.removeListener('app-log:entry', wrapped);
+      };
+    }
   }
 };
 

@@ -107,3 +107,23 @@ select {
 button {
   cursor: pointer;
 }
+
+.console-panel {
+  display: grid;
+  gap: 0.6rem;
+}
+
+#console-output {
+  margin: 0;
+  max-height: 240px;
+  overflow: auto;
+  padding: 0.75rem;
+  border-radius: 8px;
+  background: #0b1220;
+  border: 1px solid #334155;
+  color: #d1d5db;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
