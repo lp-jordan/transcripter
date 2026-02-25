@@ -1,30 +1,10 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type { AppSettings, QueueItem } from '../main/types';
 
-export type QueueItem = {
-  id: string;
-  filePath: string;
-  status:
-    | 'pending'
-    | 'extracting_audio'
-    | 'transcribing'
-    | 'writing_outputs'
-    | 'done'
-    | 'failed'
-    | 'canceled';
-  progress: number;
-  error?: string;
-  outputFiles?: string[];
-};
-
-export type AppSettings = {
-  outputDirectory: string;
-  language: string;
-  model: 'tiny' | 'base' | 'small';
-  outputOptions: {
-    txt: boolean;
-    srt: boolean;
-    json: boolean;
-  };
+export type QueueState = {
+  items: QueueItem[];
+  activeJobId: string | null;
+  hasRunningJob: boolean;
 };
 
 const api = {
@@ -33,15 +13,19 @@ const api = {
     writeText: (filePath: string, content: string) => ipcRenderer.invoke('file:writeText', filePath, content)
   },
   queue: {
-    add: (filePath: string): Promise<QueueItem> => ipcRenderer.invoke('queue:add', filePath),
-    list: (): Promise<QueueItem[]> => ipcRenderer.invoke('queue:list'),
-    remove: (id: string): Promise<boolean> => ipcRenderer.invoke('queue:remove', id),
-    cancel: (id: string): Promise<boolean> => ipcRenderer.invoke('queue:cancel', id),
-    onUpdated: (listener: (item: QueueItem) => void): (() => void) => {
-      const wrapped = (_event: unknown, payload: QueueItem) => listener(payload);
-      ipcRenderer.on('queue:updated', wrapped);
+    pickFiles: (): Promise<string[]> => ipcRenderer.invoke('queue:pickFiles'),
+    add: (sourcePaths: string[]): Promise<{ ok: true }> => ipcRenderer.invoke('queue:add', sourcePaths),
+    list: (): Promise<QueueState> => ipcRenderer.invoke('queue:list'),
+    removeSelected: (ids: string[]): Promise<{ ok: true }> => ipcRenderer.invoke('queue:removeSelected', ids),
+    clearCompleted: (): Promise<{ ok: true }> => ipcRenderer.invoke('queue:clearCompleted'),
+    start: (): Promise<{ ok: true }> => ipcRenderer.invoke('queue:start'),
+    cancelCurrent: (): Promise<{ ok: true }> => ipcRenderer.invoke('queue:cancelCurrent'),
+    openOutputFolder: (id: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('queue:openOutputFolder', id),
+    onState: (listener: (state: QueueState) => void): (() => void) => {
+      const wrapped = (_event: unknown, payload: QueueState) => listener(payload);
+      ipcRenderer.on('queue:state', wrapped);
       return () => {
-        ipcRenderer.removeListener('queue:updated', wrapped);
+        ipcRenderer.removeListener('queue:state', wrapped);
       };
     }
   },
