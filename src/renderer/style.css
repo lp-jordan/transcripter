@@ -118,6 +118,10 @@ h1 {
   z-index: 4;
 }
 
+.overflow-menu[hidden] {
+  display: none;
+}
+
 .overflow-item {
   width: 100%;
   text-align: left;
