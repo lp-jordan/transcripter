@@ -5,6 +5,8 @@
   --queue-status-accent: #60a5fa;
   --queue-status-success: #22c55e;
   --queue-status-error: #f87171;
+  --section-title-size: 0.78rem;
+  --section-title-color: #94a3b8;
 }
 
 body {
@@ -15,6 +17,15 @@ body {
 
 h1 {
   margin-bottom: 0;
+}
+
+.section-title {
+  margin: 0 0 0.65rem;
+  font-size: var(--section-title-size);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--section-title-color);
 }
 
 .layout {
@@ -138,13 +149,12 @@ h1 {
 .queue-item {
   display: grid;
   grid-template-columns: 1fr auto;
-  align-items: start;
-  gap: 0.4rem;
-  background: linear-gradient(180deg, rgba(17, 24, 39, 0.95), rgba(15, 23, 42, 0.92));
-  border: 1px solid rgba(71, 85, 105, 0.65);
-  border-radius: 7px;
-  padding: 0.42rem 0.55rem 0.62rem;
-  box-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.08);
+  align-items: center;
+  gap: 0.55rem;
+  background: #111827;
+  border: 1px solid #374151;
+  border-radius: 8px;
+  padding: 0.55rem 0.65rem 0.8rem;
   position: relative;
   --queue-item-status-color: var(--queue-status-muted);
 }
@@ -184,18 +194,27 @@ h1 {
   gap: 0.35rem;
 }
 
+.queue-item-main {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
 .queue-item-title {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 0.35rem;
   min-width: 0;
+  width: 100%;
 }
 
 .queue-item-source {
   color: #f9fafb;
-  font-weight: 560;
-  font-size: 0.89rem;
-  line-height: 1.2;
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .queue-item-status {
