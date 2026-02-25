@@ -49,6 +49,16 @@ h1 {
   margin-bottom: 0.75rem;
 }
 
+.queue-settings-summary {
+  display: block;
+  margin-bottom: 0.75rem;
+  color: #94a3b8;
+  font-size: 0.78rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .controls-primary,
 .controls-secondary,
 .controls-tertiary {

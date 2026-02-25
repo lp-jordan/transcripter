@@ -1,8 +1,10 @@
 import './style.css';
 import type { AppLogEntry, QueueState } from '../preload/preload';
+import type { AppSettings, OutputOptions } from '../main/types';
 
 const dropZone = document.getElementById('drop-zone') as HTMLDivElement;
 const queueList = document.getElementById('queue-list') as HTMLUListElement;
+const queueSettingsSummary = document.getElementById('queue-settings-summary') as HTMLElement;
 const settingsForm = document.getElementById('settings-form') as HTMLFormElement;
 const outputDirectoryInput = document.getElementById('output-directory') as HTMLInputElement;
 const pickOutputDirectoryButton = document.getElementById('pick-output-directory') as HTMLButtonElement;
@@ -35,6 +37,26 @@ let queueState: QueueState = {
 let showConsole = false;
 const appLogs: AppLogEntry[] = [];
 const MAX_CONSOLE_LINES = 200;
+const FORMAT_LABELS: Record<keyof OutputOptions, string> = {
+  txt: 'TXT',
+  timecodedTxt: 'Timecoded TXT',
+  srt: 'SRT',
+  vtt: 'VTT',
+  json: 'JSON'
+};
+
+let currentSettings: AppSettings = {
+  outputDirectory: '',
+  language: 'en',
+  model: 'tiny',
+  outputOptions: {
+    txt: false,
+    timecodedTxt: false,
+    srt: false,
+    vtt: false,
+    json: false
+  }
+};
 
 const formatStatusLabel = (status: string): string =>
   status
@@ -110,6 +132,32 @@ const pushLog = (entry: AppLogEntry) => {
 
 const getFileName = (sourcePath: string) => sourcePath.split(/[/\\]/).pop() ?? sourcePath;
 
+const getEnabledFormats = (outputOptions: OutputOptions): string[] =>
+  Object.entries(outputOptions)
+    .filter(([, enabled]) => enabled)
+    .map(([format]) => FORMAT_LABELS[format as keyof OutputOptions]);
+
+const formatLanguageLabel = (language: string): string => {
+  if (language.toLowerCase() === 'en') {
+    return 'English';
+  }
+
+  return language;
+};
+
+const renderQueueSettingsSummary = () => {
+  const enabledFormats = getEnabledFormats(currentSettings.outputOptions);
+  const summaryParts = [
+    `Output: ${currentSettings.outputDirectory}`,
+    `Model: ${currentSettings.model}`,
+    `Language: ${formatLanguageLabel(currentSettings.language)}`,
+    `Formats: ${enabledFormats.length > 0 ? enabledFormats.join(', ') : 'None'}`
+  ];
+
+  queueSettingsSummary.textContent = summaryParts.join(' • ');
+  queueSettingsSummary.title = queueSettingsSummary.textContent;
+};
+
 const createQueueItem = (item: QueueState['items'][number]): HTMLLIElement => {
   const li = document.createElement('li');
   li.className = 'queue-item';
@@ -149,15 +197,32 @@ const createQueueItem = (item: QueueState['items'][number]): HTMLLIElement => {
 
   header.append(title, status);
 
-  const config = document.createElement('small');
-  config.className = 'queue-item-meta';
-  const formats = Object.entries(item.outputOptions)
-    .filter(([, enabled]) => enabled)
-    .map(([name]) => name)
-    .join(', ');
-  config.textContent = `Output: ${item.outputDirectory} | Model: ${item.model} | Language: English | Formats: ${formats}`;
+  const itemOverrides: string[] = [];
+  if (item.outputDirectory !== currentSettings.outputDirectory) {
+    itemOverrides.push(`Output: ${item.outputDirectory}`);
+  }
 
-  details.append(header, config);
+  if (item.model !== currentSettings.model) {
+    itemOverrides.push(`Model: ${item.model}`);
+  }
+
+  if (item.language !== currentSettings.language) {
+    itemOverrides.push(`Language: ${formatLanguageLabel(item.language)}`);
+  }
+
+  const itemFormats = getEnabledFormats(item.outputOptions);
+  const defaultFormats = getEnabledFormats(currentSettings.outputOptions);
+  if (itemFormats.join('|') !== defaultFormats.join('|')) {
+    itemOverrides.push(`Formats: ${itemFormats.length > 0 ? itemFormats.join(', ') : 'None'}`);
+  }
+
+  details.append(header);
+  if (itemOverrides.length > 0) {
+    const config = document.createElement('small');
+    config.className = 'queue-item-meta';
+    config.textContent = `Overrides: ${itemOverrides.join(' • ')}`;
+    details.append(config);
+  }
 
   if (item.error) {
     const error = document.createElement('small');
@@ -184,6 +249,7 @@ const createQueueItem = (item: QueueState['items'][number]): HTMLLIElement => {
 };
 
 const renderQueue = () => {
+  renderQueueSettingsSummary();
   queueList.innerHTML = '';
   for (const item of queueState.items) {
     queueList.append(createQueueItem(item));
@@ -223,6 +289,8 @@ const saveSettings = async () => {
     }
   });
 
+  currentSettings = saved;
+
   outputDirectoryInput.value = saved.outputDirectory;
   modelSelect.value = saved.model;
   txtOutputCheckbox.checked = saved.outputOptions.txt;
@@ -230,6 +298,7 @@ const saveSettings = async () => {
   srtOutputCheckbox.checked = saved.outputOptions.srt;
   vttOutputCheckbox.checked = saved.outputOptions.vtt;
   jsonOutputCheckbox.checked = saved.outputOptions.json;
+  renderQueue();
 };
 
 dropZone.addEventListener('dragover', (event) => {
@@ -353,6 +422,7 @@ for (const element of [modelSelect, txtOutputCheckbox, timecodedTxtOutputCheckbo
 
 const bootstrap = async () => {
   const settings = await window.transcripter.settings.get();
+  currentSettings = settings;
   outputDirectoryInput.value = settings.outputDirectory;
   modelSelect.value = settings.model;
   txtOutputCheckbox.checked = settings.outputOptions.txt;
@@ -360,6 +430,8 @@ const bootstrap = async () => {
   srtOutputCheckbox.checked = settings.outputOptions.srt;
   vttOutputCheckbox.checked = settings.outputOptions.vtt;
   jsonOutputCheckbox.checked = settings.outputOptions.json;
+
+  renderQueueSettingsSummary();
 
   const initialLogs = await window.transcripter.logs.list();
   appLogs.push(...initialLogs.slice(-MAX_CONSOLE_LINES));
