@@ -83,6 +83,19 @@
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true
-    }
+    },
+    "extraResources": [
+      {
+        "from": "node_modules/ffmpeg-static",
+        "to": "ffmpeg",
+        "filter": [
+          "ffmpeg*",
+          "LICENSE*"
+        ]
+      }
+    ]
+  },
+  "dependencies": {
+    "ffmpeg-static": "^5.2.0"
   }
 }

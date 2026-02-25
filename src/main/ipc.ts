@@ -2,6 +2,7 @@ import { BrowserWindow, app, dialog, ipcMain, shell } from 'electron';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { resolveFfmpegPath } from './ffmpeg-path';
 import { ProcessorClient } from './processor-client';
 import { writeSelectedOutputs } from './output/writers';
 import type { AppSettings, OutputOptions, ProcessingJob, QueueItem } from './types';
@@ -30,7 +31,7 @@ const defaultSettings: AppSettings = {
 };
 
 const queue: QueueItem[] = [];
-const processor = new ProcessorClient();
+const processor = new ProcessorClient(resolveFfmpegPath());
 let activeJobId: string | null = null;
 const appLogs: AppLogEntry[] = [];
 
