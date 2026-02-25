@@ -44,8 +44,79 @@ h1 {
 .controls {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  align-items: center;
+  gap: 0.75rem;
   margin-bottom: 0.75rem;
+}
+
+.controls-primary,
+.controls-secondary,
+.controls-tertiary {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.controls-primary {
+  margin-right: auto;
+}
+
+.button-primary {
+  border-color: #2563eb;
+  background: linear-gradient(180deg, #3b82f6, #2563eb);
+  color: #eff6ff;
+  font-weight: 700;
+  min-width: 7rem;
+}
+
+.button-primary:hover:not(:disabled) {
+  border-color: #1d4ed8;
+  background: linear-gradient(180deg, #60a5fa, #2563eb);
+}
+
+.button-secondary {
+  border-color: #475569;
+  background: #1e293b;
+  color: #dbeafe;
+}
+
+.button-secondary:hover:not(:disabled) {
+  background: #243244;
+}
+
+.controls-tertiary {
+  position: relative;
+}
+
+.button-tertiary {
+  border-color: #374151;
+  background: transparent;
+  color: #9ca3af;
+}
+
+.button-tertiary:hover:not(:disabled) {
+  color: #d1d5db;
+  border-color: #4b5563;
+}
+
+.overflow-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.35rem);
+  min-width: 11.5rem;
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.35rem;
+  border-radius: 8px;
+  border: 1px solid #374151;
+  background: #111827;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+  z-index: 4;
+}
+
+.overflow-item {
+  width: 100%;
+  text-align: left;
 }
 
 #queue-list {
