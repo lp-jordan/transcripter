@@ -5,6 +5,8 @@
   --queue-status-accent: #60a5fa;
   --queue-status-success: #22c55e;
   --queue-status-error: #f87171;
+  --section-title-size: 0.78rem;
+  --section-title-color: #94a3b8;
 }
 
 body {
@@ -15,6 +17,15 @@ body {
 
 h1 {
   margin-bottom: 0;
+}
+
+.section-title {
+  margin: 0 0 0.65rem;
+  font-size: var(--section-title-size);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--section-title-color);
 }
 
 .layout {
