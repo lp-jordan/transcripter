@@ -138,7 +138,7 @@ h1 {
 .queue-item {
   display: grid;
   grid-template-columns: 1fr auto;
-  align-items: start;
+  align-items: center;
   gap: 0.55rem;
   background: #111827;
   border: 1px solid #374151;
@@ -179,16 +179,27 @@ h1 {
   gap: 0.4rem;
 }
 
+.queue-item-main {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
 .queue-item-title {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 0.45rem;
   min-width: 0;
+  width: 100%;
 }
 
 .queue-item-source {
   color: #f9fafb;
   font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .queue-item-status {
