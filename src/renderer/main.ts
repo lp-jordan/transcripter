@@ -10,7 +10,9 @@ const outputDirectoryInput = document.getElementById('output-directory') as HTML
 const languageInput = document.getElementById('language') as HTMLInputElement;
 const modelSelect = document.getElementById('model') as HTMLSelectElement;
 const txtOutputCheckbox = document.getElementById('format-txt') as HTMLInputElement;
+const timecodedTxtOutputCheckbox = document.getElementById('format-timecoded-txt') as HTMLInputElement;
 const srtOutputCheckbox = document.getElementById('format-srt') as HTMLInputElement;
+const vttOutputCheckbox = document.getElementById('format-vtt') as HTMLInputElement;
 const jsonOutputCheckbox = document.getElementById('format-json') as HTMLInputElement;
 
 const addFilesButton = document.getElementById('add-files') as HTMLButtonElement;
@@ -167,7 +169,9 @@ settingsForm.addEventListener('submit', async (event) => {
     model: modelSelect.value as 'tiny' | 'base' | 'small',
     outputOptions: {
       txt: txtOutputCheckbox.checked,
+      timecodedTxt: timecodedTxtOutputCheckbox.checked,
       srt: srtOutputCheckbox.checked,
+      vtt: vttOutputCheckbox.checked,
       json: jsonOutputCheckbox.checked
     }
   };
@@ -176,7 +180,9 @@ settingsForm.addEventListener('submit', async (event) => {
   languageInput.value = saved.language;
   modelSelect.value = saved.model;
   txtOutputCheckbox.checked = saved.outputOptions.txt;
+  timecodedTxtOutputCheckbox.checked = saved.outputOptions.timecodedTxt;
   srtOutputCheckbox.checked = saved.outputOptions.srt;
+  vttOutputCheckbox.checked = saved.outputOptions.vtt;
   jsonOutputCheckbox.checked = saved.outputOptions.json;
 });
 
@@ -186,7 +192,9 @@ const bootstrap = async () => {
   languageInput.value = settings.language;
   modelSelect.value = settings.model;
   txtOutputCheckbox.checked = settings.outputOptions.txt;
+  timecodedTxtOutputCheckbox.checked = settings.outputOptions.timecodedTxt;
   srtOutputCheckbox.checked = settings.outputOptions.srt;
+  vttOutputCheckbox.checked = settings.outputOptions.vtt;
   jsonOutputCheckbox.checked = settings.outputOptions.json;
 
   window.transcripter.queue.onState((nextState) => {

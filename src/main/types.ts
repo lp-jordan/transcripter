@@ -2,9 +2,13 @@ export type WhisperModel = 'tiny' | 'base' | 'small';
 
 export type OutputOptions = {
   txt: boolean;
+  timecodedTxt: boolean;
   srt: boolean;
+  vtt: boolean;
   json: boolean;
 };
+
+export type OverwritePolicy = 'overwrite' | 'skip-existing';
 
 export type QueueItemStatus =
   | 'pending'
@@ -76,4 +80,5 @@ export type AppSettings = {
   language: string;
   model: WhisperModel;
   outputOptions: OutputOptions;
+  overwritePolicy?: OverwritePolicy;
 };

@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { ProcessorClient } from './processor-client';
+import { writeSelectedOutputs } from './output/writers';
 import type { AppSettings, OutputOptions, ProcessingJob, QueueItem } from './types';
 
 const settingsPath = path.join(app.getPath('userData'), 'settings.json');
@@ -12,9 +13,12 @@ const defaultSettings: AppSettings = {
   model: 'base',
   outputOptions: {
     txt: true,
+    timecodedTxt: true,
     srt: true,
+    vtt: false,
     json: true
-  }
+  },
+  overwritePolicy: 'overwrite'
 };
 
 const queue: QueueItem[] = [];
@@ -26,7 +30,16 @@ const withSafePath = async (inputPath: string): Promise<string> => path.resolve(
 const readSettings = async (): Promise<AppSettings> => {
   try {
     const raw = await fs.readFile(settingsPath, 'utf8');
-    return { ...defaultSettings, ...(JSON.parse(raw) as Partial<AppSettings>) };
+    const parsed = JSON.parse(raw) as Partial<AppSettings>;
+    return {
+      ...defaultSettings,
+      ...parsed,
+      outputOptions: {
+        ...defaultSettings.outputOptions,
+        ...(parsed.outputOptions ?? {})
+      },
+      overwritePolicy: parsed.overwritePolicy ?? defaultSettings.overwritePolicy
+    };
   } catch {
     return defaultSettings;
   }
@@ -110,42 +123,16 @@ processor.on('complete', async (payload) => {
 
   const outDir = item.outputDirectory;
   const baseName = path.parse(item.sourcePath).name;
-  const outputFiles: string[] = [];
+  const settings = await readSettings();
 
-  await fs.mkdir(outDir, { recursive: true });
-
-  if (item.outputOptions.txt) {
-    const txtPath = path.join(outDir, `${baseName}.txt`);
-    await fs.writeFile(txtPath, `${payload.transcriptText.trim()}\n`, 'utf8');
-    outputFiles.push(txtPath);
-  }
-
-  if (item.outputOptions.json) {
-    const jsonPath = path.join(outDir, `${baseName}.json`);
-    await fs.writeFile(
-      jsonPath,
-      `${JSON.stringify({ text: payload.transcriptText, segments: payload.segments }, null, 2)}\n`,
-      'utf8'
-    );
-    outputFiles.push(jsonPath);
-  }
-
-  if (item.outputOptions.srt) {
-    const srtPath = path.join(outDir, `${baseName}.srt`);
-    const toTime = (seconds: number) => {
-      const millis = Math.max(0, Math.floor(seconds * 1000));
-      const hours = Math.floor(millis / 3_600_000);
-      const minutes = Math.floor((millis % 3_600_000) / 60_000);
-      const secs = Math.floor((millis % 60_000) / 1000);
-      const ms = millis % 1000;
-      return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')},${String(ms).padStart(3, '0')}`;
-    };
-    const body = payload.segments
-      .map((segment, index) => `${index + 1}\n${toTime(segment.start)} --> ${toTime(segment.end)}\n${segment.text}\n`)
-      .join('\n');
-    await fs.writeFile(srtPath, body, 'utf8');
-    outputFiles.push(srtPath);
-  }
+  const outputFiles = await writeSelectedOutputs({
+    outputDirectory: outDir,
+    baseName,
+    outputOptions: item.outputOptions,
+    segments: payload.segments,
+    transcriptText: payload.transcriptText,
+    overwritePolicy: settings.overwritePolicy ?? 'overwrite'
+  });
 
   item.outputFiles = outputFiles;
   item.status = 'done';
