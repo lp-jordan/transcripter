@@ -2,9 +2,9 @@ import { BrowserWindow, app, dialog, ipcMain, shell } from 'electron';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { resolveFfmpegPath } from './ffmpeg-path';
+import { resolveFfmpegPathWithMeta } from './ffmpeg-path';
 import { ProcessorClient } from './processor-client';
-import { resolveWhisperModelDirectory, resolveWhisperPath } from './whisper-path';
+import { resolveWhisperModelDirectoryWithMeta, resolveWhisperPathWithMeta } from './whisper-path';
 import { writeSelectedOutputs } from './output/writers';
 import type { AppSettings, OutputOptions, ProcessingJob, QueueItem } from './types';
 
@@ -32,11 +32,11 @@ const defaultSettings: AppSettings = {
 };
 
 const queue: QueueItem[] = [];
-const resolvedFfmpegPath = resolveFfmpegPath();
-const resolvedWhisperPath = resolveWhisperPath();
-const resolvedWhisperModelDirectory = resolveWhisperModelDirectory();
+const ffmpegRuntime = resolveFfmpegPathWithMeta();
+const whisperRuntime = resolveWhisperPathWithMeta();
+const whisperModelRuntime = resolveWhisperModelDirectoryWithMeta();
 
-const processor = new ProcessorClient(resolvedFfmpegPath, resolvedWhisperPath, resolvedWhisperModelDirectory);
+const processor = new ProcessorClient(ffmpegRuntime.resolvedPath, whisperRuntime.resolvedPath, whisperModelRuntime.resolvedPath);
 let activeJobId: string | null = null;
 let queuePaused = false;
 const appLogs: AppLogEntry[] = [];
@@ -108,19 +108,33 @@ const persistSettings = async (next: Partial<AppSettings>) => {
 };
 
 
+const runtimeValidationByModel = new Map<ProcessingJob['model'], string | null>();
+let runtimeValidationErrorShown = false;
+
+const formatRuntimeError = (model: ProcessingJob['model'], reason: string): string => [
+  'Processing runtime is unavailable. Queue is paused until runtime files are installed.',
+  `Resolution mode: ${ffmpegRuntime.mode === 'packaged' ? 'packaged app resources' : 'development paths'}.`,
+  `FFmpeg path: ${ffmpegRuntime.resolvedPath}`,
+  `whisper.cpp path: ${whisperRuntime.resolvedPath}`,
+  `Model directory: ${whisperModelRuntime.resolvedPath}`,
+  `Model requested: ${model}`,
+  `Details: ${reason}`
+].join(' ');
+
 const validateRuntimeForModel = async (model: ProcessingJob['model']): Promise<string | null> => {
+  if (runtimeValidationByModel.has(model)) {
+    return runtimeValidationByModel.get(model) ?? null;
+  }
+
   try {
     await processor.validateRuntime(model);
+    runtimeValidationByModel.set(model, null);
     return null;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    return [
-      'Processing runtime is unavailable.',
-      `Expected FFmpeg executable: ${resolvedFfmpegPath}`,
-      `Expected whisper.cpp executable: ${resolvedWhisperPath}`,
-      `Expected model directory: ${resolvedWhisperModelDirectory}`,
-      `Details: ${reason}`
-    ].join(' ');
+    const runtimeError = formatRuntimeError(model, reason);
+    runtimeValidationByModel.set(model, runtimeError);
+    return runtimeError;
   }
 };
 
@@ -129,7 +143,7 @@ void (async () => {
   if (runtimeError) {
     appendLog(runtimeError, 'error');
   } else {
-    appendLog('Runtime check passed: bundled FFmpeg and whisper.cpp were detected.');
+    appendLog(`Runtime check passed (${ffmpegRuntime.mode} mode): FFmpeg, whisper.cpp, and model files were detected.`);
   }
 })();
 
@@ -159,13 +173,15 @@ const processNextPending = async () => {
   appendLog(`Started processing ${path.basename(next.sourcePath)} (${next.id}).`);
   const runtimeError = await validateRuntimeForModel(next.model);
   if (runtimeError) {
-    next.status = 'failed';
-    next.error = runtimeError;
-    next.progress = 0;
     activeJobId = null;
-    appendLog(`Cannot start ${path.basename(next.sourcePath)}: ${runtimeError}`, 'error');
+    queuePaused = true;
+
+    if (!runtimeValidationErrorShown) {
+      appendLog(runtimeError, 'error');
+      runtimeValidationErrorShown = true;
+    }
+
     emitQueueState();
-    void processNextPending();
     return;
   }
 
