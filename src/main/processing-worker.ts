@@ -11,6 +11,7 @@ import type {
   WorkerInboundMessage,
   WorkerOutboundMessage
 } from './types';
+import { clampActiveTranscriptionProgress, parseWhisperTranscriptionProgress } from './whisper-progress';
 
 const canceledJobs = new Set<string>();
 const activeProcesses = new Map<string, ChildProcessWithoutNullStreams>();
@@ -172,20 +173,6 @@ const ensureNotCanceled = (jobId: string) => {
   }
 };
 
-const parseWhisperProgress = (line: string): number | null => {
-  const match = line.match(/(\d+(?:\.\d+)?)%/);
-  if (!match) {
-    return null;
-  }
-
-  const value = Number.parseFloat(match[1]);
-  if (Number.isNaN(value)) {
-    return null;
-  }
-
-  return Math.max(0, Math.min(100, value));
-};
-
 const runChildProcess = async (jobId: string, command: string, args: string[], onLine?: (line: string) => void): Promise<void> =>
   new Promise((resolve, reject) => {
     const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -299,6 +286,52 @@ const extractAudio = async (job: ProcessingJob, tempDir: string): Promise<string
   return outputWavPath;
 };
 
+const resolveFfprobeCommand = async (): Promise<string> => {
+  if (ffmpegPath && path.isAbsolute(ffmpegPath)) {
+    const ffprobeCandidate = path.join(path.dirname(ffmpegPath), process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe');
+    try {
+      await fs.access(ffprobeCandidate, fsConstants.R_OK | fsConstants.X_OK);
+      return ffprobeCandidate;
+    } catch {
+      // Fall through to system ffprobe.
+    }
+  }
+
+  return 'ffprobe';
+};
+
+const probeAudioDurationSeconds = async (wavPath: string): Promise<number | null> => {
+  const ffprobeCommand = await resolveFfprobeCommand();
+
+  return new Promise((resolve) => {
+    const child = spawn(ffprobeCommand, [
+      '-v',
+      'error',
+      '-show_entries',
+      'format=duration',
+      '-of',
+      'default=nokey=1:noprint_wrappers=1',
+      wavPath
+    ], { stdio: ['ignore', 'pipe', 'pipe'] });
+
+    let stdout = '';
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+
+    child.on('error', () => resolve(null));
+    child.on('close', (code) => {
+      if (code !== 0) {
+        resolve(null);
+        return;
+      }
+
+      const duration = Number.parseFloat(stdout.trim());
+      resolve(Number.isFinite(duration) && duration > 0 ? duration : null);
+    });
+  });
+};
+
 const transcribeAudio = async (job: ProcessingJob, wavPath: string, tempDir: string): Promise<{ transcriptText: string; segments: Segment[] }> => {
   const whisperCommand = await resolveWhisperCommand();
   const whisperModelPath = await resolveWhisperModelPath(job);
@@ -329,20 +362,27 @@ const transcribeAudio = async (job: ProcessingJob, wavPath: string, tempDir: str
     args.push('-l', job.language);
   }
 
+  const totalDurationSeconds = await probeAudioDurationSeconds(wavPath);
   let lastProgress = 0;
+
   await runChildProcess(job.id, whisperCommand, args, (line) => {
-    const parsedProgress = parseWhisperProgress(line);
-    if (parsedProgress === null || parsedProgress <= lastProgress) {
+    const parsedProgress = parseWhisperTranscriptionProgress(line, totalDurationSeconds ?? 0);
+    if (parsedProgress === null) {
       return;
     }
 
-    lastProgress = parsedProgress;
+    const nextProgress = clampActiveTranscriptionProgress(parsedProgress);
+    if (nextProgress <= lastProgress) {
+      return;
+    }
+
+    lastProgress = nextProgress;
     postMessage({
       type: 'progress',
       payload: {
         jobId: job.id,
         stage: 'transcribing',
-        progress: parsedProgress,
+        progress: nextProgress,
         message: 'Transcribing audio'
       }
     });
