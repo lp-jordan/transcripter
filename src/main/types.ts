@@ -1,0 +1,68 @@
+export type WhisperModel = 'tiny' | 'base' | 'small';
+
+export type OutputOptions = {
+  txt: boolean;
+  srt: boolean;
+  json: boolean;
+};
+
+export type QueueItemStatus =
+  | 'pending'
+  | 'extracting_audio'
+  | 'transcribing'
+  | 'writing_outputs'
+  | 'done'
+  | 'failed'
+  | 'canceled';
+
+export type QueueItem = {
+  id: string;
+  filePath: string;
+  status: QueueItemStatus;
+  progress: number;
+  error?: string;
+  outputFiles?: string[];
+};
+
+export type Segment = {
+  start: number;
+  end: number;
+  text: string;
+};
+
+export type ProcessingJob = {
+  id: string;
+  filePath: string;
+  outputDirectory: string;
+  language?: string;
+  model: WhisperModel;
+  outputOptions: OutputOptions;
+};
+
+export type ProcessingProgressEvent = {
+  jobId: string;
+  stage: 'extracting_audio' | 'transcribing' | 'writing_outputs';
+  progress: number;
+  message?: string;
+};
+
+export type ProcessingCompleteEvent = {
+  jobId: string;
+  segments: Segment[];
+  transcriptText: string;
+};
+
+export type ProcessingErrorEvent = {
+  jobId: string;
+  error: string;
+  canceled?: boolean;
+};
+
+export type WorkerInboundMessage =
+  | { type: 'run'; job: ProcessingJob }
+  | { type: 'cancel'; jobId: string };
+
+export type WorkerOutboundMessage =
+  | { type: 'progress'; payload: ProcessingProgressEvent }
+  | { type: 'complete'; payload: ProcessingCompleteEvent }
+  | { type: 'error'; payload: ProcessingErrorEvent };

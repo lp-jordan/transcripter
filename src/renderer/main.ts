@@ -1,16 +1,12 @@
-import './styles.css';
-
-type QueueItem = {
-  id: string;
-  filePath: string;
-  status: string;
-};
+import './style.css';
+import type { QueueItem } from '../preload/preload';
 
 const dropZone = document.getElementById('drop-zone') as HTMLDivElement;
 const queueList = document.getElementById('queue-list') as HTMLUListElement;
 const settingsForm = document.getElementById('settings-form') as HTMLFormElement;
 const outputDirectoryInput = document.getElementById('output-directory') as HTMLInputElement;
 const languageInput = document.getElementById('language') as HTMLInputElement;
+const modelSelect = document.getElementById('model') as HTMLSelectElement;
 
 const renderQueue = async () => {
   const items = await window.transcripter.queue.list();
@@ -26,7 +22,8 @@ const createQueueItem = (item: QueueItem): HTMLLIElement => {
   li.className = 'queue-item';
 
   const text = document.createElement('span');
-  text.textContent = `${item.filePath} (${item.status})`;
+  const status = `${item.status} ${Math.round(item.progress)}%`;
+  text.textContent = `${item.filePath} (${status})`;
 
   const remove = document.createElement('button');
   remove.type = 'button';
@@ -36,7 +33,16 @@ const createQueueItem = (item: QueueItem): HTMLLIElement => {
     await renderQueue();
   });
 
-  li.append(text, remove);
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.textContent = 'Cancel';
+  cancel.disabled = !['extracting_audio', 'transcribing', 'writing_outputs'].includes(item.status);
+  cancel.addEventListener('click', async () => {
+    await window.transcripter.queue.cancel(item.id);
+    await renderQueue();
+  });
+
+  li.append(text, remove, cancel);
   return li;
 };
 
@@ -70,18 +76,26 @@ settingsForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   const next = {
     outputDirectory: outputDirectoryInput.value,
-    language: languageInput.value
+    language: languageInput.value,
+    model: modelSelect.value as 'tiny' | 'base' | 'small'
   };
   const saved = await window.transcripter.settings.set(next);
   outputDirectoryInput.value = saved.outputDirectory;
   languageInput.value = saved.language;
+  modelSelect.value = saved.model;
 });
 
 const bootstrap = async () => {
   const settings = await window.transcripter.settings.get();
   outputDirectoryInput.value = settings.outputDirectory;
   languageInput.value = settings.language;
+  modelSelect.value = settings.model;
+
+  window.transcripter.queue.onUpdated(() => {
+    void renderQueue();
+  });
+
   await renderQueue();
 };
 
-bootstrap();
+void bootstrap();
