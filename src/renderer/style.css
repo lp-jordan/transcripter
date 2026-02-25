@@ -139,6 +139,10 @@ button {
   letter-spacing: 0.02em;
 }
 
+
+.console-popover[hidden] {
+  display: none;
+}
 .console-popover {
   position: fixed;
   left: 1rem;

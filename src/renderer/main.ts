@@ -35,6 +35,30 @@ let showConsole = false;
 const appLogs: AppLogEntry[] = [];
 const MAX_CONSOLE_LINES = 200;
 
+const formatStatusLabel = (status: string): string =>
+  status
+    .split('_')
+    .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
+    .join(' ');
+
+const fileUrlToPath = (value: string): string | null => {
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== 'file:') {
+      return null;
+    }
+
+    const decodedPathname = decodeURIComponent(parsed.pathname);
+    if (/^\/[a-zA-Z]:\//.test(decodedPathname)) {
+      return decodedPathname.slice(1);
+    }
+
+    return decodedPathname;
+  } catch {
+    return null;
+  }
+};
+
 const updateButtons = () => {
   removeSelectedButton.disabled = selectedIds.size === 0;
   cancelCurrentButton.disabled = !queueState.hasRunningJob;
@@ -94,7 +118,7 @@ const createQueueItem = (item: QueueState['items'][number]): HTMLLIElement => {
   details.className = 'queue-item-details';
 
   const status = document.createElement('strong');
-  status.textContent = `${item.status} • ${Math.round(item.progress)}%`;
+  status.textContent = `${formatStatusLabel(item.status)} • ${Math.round(item.progress)}%`;
 
   const source = document.createElement('span');
   source.textContent = getFileName(item.sourcePath);
@@ -194,9 +218,24 @@ dropZone.addEventListener('dragleave', () => {
 dropZone.addEventListener('drop', async (event: DragEvent) => {
   event.preventDefault();
   dropZone.classList.remove('dragging');
-  const paths = [...(event.dataTransfer?.files ?? [])]
-    .filter((file): file is File & { path: string } => 'path' in file && typeof file.path === 'string')
-    .map((file) => file.path);
+
+  const filePaths = [...(event.dataTransfer?.files ?? [])]
+    .flatMap((file) => {
+      const candidate = (file as File & { path?: string }).path;
+      return typeof candidate === 'string' && candidate.length > 0 ? [candidate] : [];
+    });
+
+  const uriList = event.dataTransfer?.getData('text/uri-list') ?? '';
+  const droppedUris = uriList
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith('#'))
+    .flatMap((line) => {
+      const path = fileUrlToPath(line);
+      return path ? [path] : [];
+    });
+
+  const paths = [...new Set([...filePaths, ...droppedUris])];
   await addFiles(paths);
 });
 
