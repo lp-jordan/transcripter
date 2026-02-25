@@ -17,7 +17,11 @@ export type QueueItemStatus =
 
 export type QueueItem = {
   id: string;
-  filePath: string;
+  sourcePath: string;
+  outputDirectory: string;
+  outputOptions: OutputOptions;
+  model: WhisperModel;
+  language: string;
   status: QueueItemStatus;
   progress: number;
   error?: string;
@@ -66,3 +70,10 @@ export type WorkerOutboundMessage =
   | { type: 'progress'; payload: ProcessingProgressEvent }
   | { type: 'complete'; payload: ProcessingCompleteEvent }
   | { type: 'error'; payload: ProcessingErrorEvent };
+
+export type AppSettings = {
+  outputDirectory: string;
+  language: string;
+  model: WhisperModel;
+  outputOptions: OutputOptions;
+};
