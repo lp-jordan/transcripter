@@ -1,6 +1,10 @@
 :root {
   color-scheme: dark;
   font-family: Inter, system-ui, -apple-system, sans-serif;
+  --queue-status-muted: #94a3b8;
+  --queue-status-accent: #60a5fa;
+  --queue-status-success: #22c55e;
+  --queue-status-error: #f87171;
 }
 
 body {
@@ -135,7 +139,26 @@ h1 {
   background: #111827;
   border: 1px solid #374151;
   border-radius: 8px;
-  padding: 0.55rem 0.65rem;
+  padding: 0.55rem 0.65rem 0.8rem;
+  position: relative;
+  --queue-item-status-color: var(--queue-status-muted);
+}
+
+.queue-item.status-pending,
+.queue-item.status-canceled {
+  --queue-item-status-color: var(--queue-status-muted);
+}
+
+.queue-item.status-processing {
+  --queue-item-status-color: var(--queue-status-accent);
+}
+
+.queue-item.status-done {
+  --queue-item-status-color: var(--queue-status-success);
+}
+
+.queue-item.status-failed {
+  --queue-item-status-color: var(--queue-status-error);
 }
 
 .queue-item-details {
@@ -165,7 +188,7 @@ h1 {
 }
 
 .queue-item-status {
-  color: #e5e7eb;
+  color: var(--queue-item-status-color);
   font-size: 0.82rem;
   white-space: nowrap;
 }
@@ -184,6 +207,25 @@ h1 {
 .queue-item-actions {
   display: flex;
   align-items: center;
+}
+
+.queue-item-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: rgba(148, 163, 184, 0.2);
+  border-radius: 0 0 8px 8px;
+  overflow: hidden;
+}
+
+.queue-item-progress-fill {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--queue-item-status-color);
+  transition: width 180ms ease;
 }
 
 .error {

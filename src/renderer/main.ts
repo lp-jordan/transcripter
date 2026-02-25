@@ -110,9 +110,29 @@ const pushLog = (entry: AppLogEntry) => {
 
 const getFileName = (sourcePath: string) => sourcePath.split(/[/\\]/).pop() ?? sourcePath;
 
+const getStatusClassName = (status: QueueState['items'][number]['status']): string => {
+  if (status === 'pending') {
+    return 'status-pending';
+  }
+
+  if (status === 'canceled') {
+    return 'status-canceled';
+  }
+
+  if (status === 'done') {
+    return 'status-done';
+  }
+
+  if (status === 'failed') {
+    return 'status-failed';
+  }
+
+  return 'status-processing';
+};
+
 const createQueueItem = (item: QueueState['items'][number]): HTMLLIElement => {
   const li = document.createElement('li');
-  li.className = 'queue-item';
+  li.className = `queue-item ${getStatusClassName(item.status)}`;
 
   const details = document.createElement('div');
   details.className = 'queue-item-details';
@@ -179,7 +199,14 @@ const createQueueItem = (item: QueueState['items'][number]): HTMLLIElement => {
     actions.append(openOutput);
   }
 
-  li.append(details, actions);
+  const progressTrack = document.createElement('div');
+  progressTrack.className = 'queue-item-progress';
+  const progressFill = document.createElement('span');
+  progressFill.className = 'queue-item-progress-fill';
+  progressFill.style.width = `${Math.max(0, Math.min(100, item.progress))}%`;
+  progressTrack.append(progressFill);
+
+  li.append(details, actions, progressTrack);
   return li;
 };
 
