@@ -127,3 +127,16 @@ button {
   line-height: 1.5;
   white-space: pre-wrap;
 }
+
+#runtime-help {
+  margin-top: 0.35rem;
+  color: #bfdbfe;
+  font-size: 0.9rem;
+}
+
+#runtime-help code {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  padding: 0.1rem 0.25rem;
+}

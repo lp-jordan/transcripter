@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { resolveFfmpegPath } from './ffmpeg-path';
 import { ProcessorClient } from './processor-client';
-import { resolveWhisperPath } from './whisper-path';
+import { resolveWhisperModelDirectory, resolveWhisperPath } from './whisper-path';
 import { writeSelectedOutputs } from './output/writers';
 import type { AppSettings, OutputOptions, ProcessingJob, QueueItem } from './types';
 
@@ -32,7 +32,11 @@ const defaultSettings: AppSettings = {
 };
 
 const queue: QueueItem[] = [];
-const processor = new ProcessorClient(resolveFfmpegPath(), resolveWhisperPath());
+const resolvedFfmpegPath = resolveFfmpegPath();
+const resolvedWhisperPath = resolveWhisperPath();
+const resolvedWhisperModelDirectory = resolveWhisperModelDirectory();
+
+const processor = new ProcessorClient(resolvedFfmpegPath, resolvedWhisperPath, resolvedWhisperModelDirectory);
 let activeJobId: string | null = null;
 let queuePaused = false;
 const appLogs: AppLogEntry[] = [];
@@ -103,6 +107,32 @@ const persistSettings = async (next: Partial<AppSettings>) => {
   return merged;
 };
 
+
+const validateRuntimeForModel = async (model: ProcessingJob['model']): Promise<string | null> => {
+  try {
+    await processor.validateRuntime(model);
+    return null;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return [
+      'Processing runtime is unavailable.',
+      `Expected FFmpeg executable: ${resolvedFfmpegPath}`,
+      `Expected whisper.cpp executable: ${resolvedWhisperPath}`,
+      `Expected model directory: ${resolvedWhisperModelDirectory}`,
+      `Details: ${reason}`
+    ].join(' ');
+  }
+};
+
+void (async () => {
+  const runtimeError = await validateRuntimeForModel(defaultSettings.model);
+  if (runtimeError) {
+    appendLog(runtimeError, 'error');
+  } else {
+    appendLog('Runtime check passed: bundled FFmpeg and whisper.cpp were detected.');
+  }
+})();
+
 const queueItemToJob = (item: QueueItem): ProcessingJob => ({
   id: item.id,
   filePath: item.sourcePath,
@@ -114,7 +144,7 @@ const queueItemToJob = (item: QueueItem): ProcessingJob => ({
 
 const findNextPending = () => queue.find((item) => item.status === 'pending');
 
-const processNextPending = () => {
+const processNextPending = async () => {
   if (activeJobId || queuePaused) {
     return;
   }
@@ -127,6 +157,18 @@ const processNextPending = () => {
 
   activeJobId = next.id;
   appendLog(`Started processing ${path.basename(next.sourcePath)} (${next.id}).`);
+  const runtimeError = await validateRuntimeForModel(next.model);
+  if (runtimeError) {
+    next.status = 'failed';
+    next.error = runtimeError;
+    next.progress = 0;
+    activeJobId = null;
+    appendLog(`Cannot start ${path.basename(next.sourcePath)}: ${runtimeError}`, 'error');
+    emitQueueState();
+    void processNextPending();
+    return;
+  }
+
   processor.run(queueItemToJob(next));
   emitQueueState();
 };
@@ -181,7 +223,7 @@ processor.on('complete', async (payload) => {
 
   activeJobId = null;
   emitQueueState();
-  processNextPending();
+  void processNextPending();
 });
 
 processor.on('error', (payload) => {
@@ -210,7 +252,7 @@ processor.on('error', (payload) => {
   }
 
   emitQueueState();
-  processNextPending();
+  void processNextPending();
 });
 
 app.on('before-quit', () => {
@@ -288,10 +330,21 @@ ipcMain.handle('queue:clearCompleted', () => {
   return { ok: true as const };
 });
 
-ipcMain.handle('queue:start', () => {
+ipcMain.handle('queue:start', async () => {
   queuePaused = false;
   appendLog('Queue start requested.');
-  processNextPending();
+
+  const firstPending = findNextPending();
+  if (firstPending) {
+    const runtimeError = await validateRuntimeForModel(firstPending.model);
+    if (runtimeError) {
+      appendLog(runtimeError, 'error');
+      emitQueueState();
+      return { ok: false as const, error: runtimeError };
+    }
+  }
+
+  void processNextPending();
   emitQueueState();
   return { ok: true as const };
 });
@@ -310,7 +363,7 @@ ipcMain.handle('queue:resume', () => {
   if (queuePaused) {
     queuePaused = false;
     appendLog('Queue resumed.');
-    processNextPending();
+    void processNextPending();
     emitQueueState();
   }
 
