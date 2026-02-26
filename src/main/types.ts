@@ -30,6 +30,15 @@ export type QueueItem = {
   progress: number;
   error?: string;
   outputFiles?: string[];
+  batchId?: string;
+  batchStartedAt?: string;
+};
+
+export type ArchiveBatch = {
+  id: string;
+  startedAt: string;
+  archivedAt: string;
+  items: QueueItem[];
 };
 
 export type Segment = {
