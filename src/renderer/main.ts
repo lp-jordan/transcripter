@@ -74,7 +74,7 @@ const updateButtons = () => {
   const selectedQueueItems = selectableQueueItems.filter((item) => selectedIds.has(item.id));
   const allSelectableQueueItemsAreSelected = selectableQueueItems.length > 0 && selectedQueueItems.length === selectableQueueItems.length;
 
-  removeSelectedButton.disabled = selectedIds.size === 0;
+  removeSelectedButton.disabled = selectedQueueItems.length === 0;
   clearCompletedButton.disabled = queueState.items.every((item) => item.status !== 'done' && item.status !== 'failed');
   cancelCurrentButton.disabled = !queueState.hasRunningJob;
 

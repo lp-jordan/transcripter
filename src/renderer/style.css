@@ -390,6 +390,14 @@ button {
   cursor: pointer;
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+  border-color: #4b5563;
+  background: #374151;
+  color: #9ca3af;
+}
+
 .console-panel {
   display: grid;
   gap: 0.6rem;
