@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { AppLogEntry, AppSettings, ArchiveBatch, QueueItem } from '../main/types';
 
 export type QueueState = {
@@ -15,6 +15,7 @@ const api = {
     writeText: (filePath: string, content: string) => ipcRenderer.invoke('file:writeText', filePath, content)
   },
   queue: {
+    getPathForFile: (file: File): string => webUtils.getPathForFile(file),
     pickFiles: (): Promise<string[]> => ipcRenderer.invoke('queue:pickFiles'),
     add: (sourcePaths: string[]): Promise<{ ok: true }> => ipcRenderer.invoke('queue:add', sourcePaths),
     list: (): Promise<QueueState> => ipcRenderer.invoke('queue:list'),

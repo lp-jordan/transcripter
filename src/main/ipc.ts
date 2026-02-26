@@ -9,6 +9,7 @@ import type { AppLogEntry, AppSettings, ArchiveBatch, OutputOptions, ProcessingJ
 import { resolveWhisperModelDirectoryWithMeta, resolveWhisperPathWithMeta } from './whisper-path';
 
 const settingsPath = path.join(app.getPath('userData'), 'settings.json');
+const archivePath = path.join(app.getPath('userData'), 'archive.json');
 const defaultSettings: AppSettings = {
   outputDirectory: app.getPath('documents'),
   language: 'en',
@@ -84,6 +85,38 @@ const sanitizeSettings = (value: unknown): AppSettings => {
   };
 };
 
+const sanitizeArchiveBatches = (value: unknown): ArchiveBatch[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const batches: ArchiveBatch[] = [];
+  for (const batch of value) {
+    if (!batch || typeof batch !== 'object') {
+      continue;
+    }
+
+    const candidate = batch as Partial<ArchiveBatch>;
+    if (
+      typeof candidate.id !== 'string' ||
+      typeof candidate.startedAt !== 'string' ||
+      typeof candidate.archivedAt !== 'string' ||
+      !Array.isArray(candidate.items)
+    ) {
+      continue;
+    }
+
+    batches.push({
+      id: candidate.id,
+      startedAt: candidate.startedAt,
+      archivedAt: candidate.archivedAt,
+      items: candidate.items
+    });
+  }
+
+  return batches;
+};
+
 const appendLog = (entry: Omit<AppLogEntry, 'timestamp'>) => {
   const withTimestamp: AppLogEntry = {
     timestamp: new Date().toISOString(),
@@ -101,17 +134,14 @@ const appendLog = (entry: Omit<AppLogEntry, 'timestamp'>) => {
 };
 
 const MIN_CONTENT_HEIGHT = 760;
+const WINDOW_HEIGHT_PADDING = 56;
 
 const ensureWindowCanFitContent = (window: BrowserWindow, requestedContentHeight: number) => {
   const display = screen.getDisplayMatching(window.getBounds());
   const maxWindowHeight = display.workAreaSize.height;
   const [currentWindowWidth, currentWindowHeight] = window.getSize();
-  const [contentWidth, contentHeight] = window.getContentSize();
-  const frameHeight = Math.max(0, currentWindowHeight - contentHeight);
-  const [, minWindowHeight] = window.getMinimumSize();
-
   const desiredWindowHeight = Math.min(
-    Math.max(minWindowHeight, MIN_CONTENT_HEIGHT, Math.ceil(requestedContentHeight) + frameHeight),
+    Math.max(MIN_CONTENT_HEIGHT, Math.ceil(requestedContentHeight) + WINDOW_HEIGHT_PADDING),
     maxWindowHeight
   );
 
@@ -119,7 +149,7 @@ const ensureWindowCanFitContent = (window: BrowserWindow, requestedContentHeight
     return;
   }
 
-  window.setSize(Math.max(currentWindowWidth, contentWidth), desiredWindowHeight);
+  window.setSize(currentWindowWidth, desiredWindowHeight);
 };
 
 const withSafePath = async (inputPath: string): Promise<string> => path.resolve(inputPath);
@@ -132,6 +162,21 @@ const readSettings = async (): Promise<AppSettings> => {
   } catch {
     return { ...defaultSettings };
   }
+};
+
+const readArchiveBatches = async (): Promise<ArchiveBatch[]> => {
+  try {
+    const raw = await fs.readFile(archivePath, 'utf8');
+    const parsed = JSON.parse(raw) as unknown;
+    return sanitizeArchiveBatches(parsed);
+  } catch {
+    return [];
+  }
+};
+
+const persistArchiveBatches = async (): Promise<void> => {
+  await fs.mkdir(path.dirname(archivePath), { recursive: true });
+  await fs.writeFile(archivePath, JSON.stringify(archiveBatches, null, 2), 'utf8');
 };
 
 const emitQueueState = () => {
@@ -287,6 +332,10 @@ const validateRuntimeForModel = async (model: ProcessingJob['model']): Promise<s
 };
 
 void (async () => {
+  const loadedArchiveBatches = await readArchiveBatches();
+  archiveBatches.length = 0;
+  archiveBatches.push(...loadedArchiveBatches);
+
   const runtimeError = await validateRuntimeForModel(defaultSettings.model);
   if (runtimeError) {
     appendLog({ level: 'error', event: 'runtime.invalid', message: runtimeError });
@@ -593,6 +642,13 @@ ipcMain.handle('queue:archiveCompleted', () => {
 
   queue.length = 0;
   queue.push(...remainingItems);
+  void persistArchiveBatches().catch((error) => {
+    appendLog({
+      level: 'error',
+      event: 'queue.archive_persist_failed',
+      message: `Failed to persist archive batches: ${error instanceof Error ? error.message : String(error)}`
+    });
+  });
   emitQueueState();
 
   if (completedItems.length > 0) {
