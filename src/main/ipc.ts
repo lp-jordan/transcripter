@@ -5,7 +5,7 @@ import path from 'node:path';
 import { resolveFfmpegPathWithMeta } from './ffmpeg-path';
 import { writeSelectedOutputs } from './output/writers';
 import { ProcessorClient } from './processor-client';
-import type { AppLogEntry, AppSettings, OutputOptions, ProcessingJob, QueueItem, WhisperModel } from './types';
+import type { AppLogEntry, AppSettings, ArchiveBatch, OutputOptions, ProcessingJob, QueueItem, WhisperModel } from './types';
 import { resolveWhisperModelDirectoryWithMeta, resolveWhisperPathWithMeta } from './whisper-path';
 
 const settingsPath = path.join(app.getPath('userData'), 'settings.json');
@@ -25,6 +25,7 @@ const defaultSettings: AppSettings = {
 };
 
 const queue: QueueItem[] = [];
+const archiveBatches: ArchiveBatch[] = [];
 const ffmpegRuntime = resolveFfmpegPathWithMeta();
 const whisperRuntime = resolveWhisperPathWithMeta();
 const whisperModelRuntime = resolveWhisperModelDirectoryWithMeta();
@@ -114,6 +115,7 @@ const readSettings = async (): Promise<AppSettings> => {
 const emitQueueState = () => {
   const snapshot = {
     items: [...queue],
+    archiveBatches: [...archiveBatches],
     activeJobId,
     hasRunningJob: Boolean(activeJobId),
     isPaused: queuePaused
@@ -479,7 +481,13 @@ ipcMain.handle('settings:pickOutputDirectory', async (_event, defaultPath?: stri
 
 ipcMain.handle('app-log:list', () => [...appLogs]);
 
-ipcMain.handle('queue:list', () => ({ items: [...queue], activeJobId, hasRunningJob: Boolean(activeJobId), isPaused: queuePaused }));
+ipcMain.handle('queue:list', () => ({
+  items: [...queue],
+  archiveBatches: [...archiveBatches],
+  activeJobId,
+  hasRunningJob: Boolean(activeJobId),
+  isPaused: queuePaused
+}));
 
 ipcMain.handle('queue:add', async (_event, sourcePaths: string[]) => {
   const settings = await readSettings();
@@ -522,15 +530,43 @@ ipcMain.handle('queue:removeSelected', (_event, ids: string[]) => {
   return { ok: true as const };
 });
 
-ipcMain.handle('queue:clearCompleted', () => {
-  const removedCount = queue.filter((item) => ['done', 'failed', 'canceled'].includes(item.status)).length;
-  const next = queue.filter((item) => !['done', 'failed', 'canceled'].includes(item.status));
-  queue.length = 0;
-  queue.push(...next);
-  emitQueueState();
-  if (removedCount > 0) {
-    appendLog({ level: 'info', event: 'queue.cleared', message: `Cleared ${removedCount} completed queue item(s).` });
+ipcMain.handle('queue:archiveCompleted', () => {
+  const completedItems = queue.filter((item) => ['done', 'failed', 'canceled'].includes(item.status));
+  const remainingItems = queue.filter((item) => !['done', 'failed', 'canceled'].includes(item.status));
+
+  const byBatch = new Map<string, QueueItem[]>();
+  for (const item of completedItems) {
+    const batchId = item.batchId ?? `manual_${item.id}`;
+    const existing = byBatch.get(batchId);
+    if (existing) {
+      existing.push(item);
+    } else {
+      byBatch.set(batchId, [item]);
+    }
   }
+
+  const archivedAt = new Date().toISOString();
+  for (const [batchId, items] of byBatch.entries()) {
+    archiveBatches.unshift({
+      id: batchId,
+      startedAt: items[0]?.batchStartedAt ?? archivedAt,
+      archivedAt,
+      items: [...items]
+    });
+  }
+
+  queue.length = 0;
+  queue.push(...remainingItems);
+  emitQueueState();
+
+  if (completedItems.length > 0) {
+    appendLog({
+      level: 'info',
+      event: 'queue.archived',
+      message: `Archived ${completedItems.length} completed queue item(s) across ${byBatch.size} batch(es).`
+    });
+  }
+
   return { ok: true as const };
 });
 
@@ -538,9 +574,12 @@ ipcMain.handle('queue:start', async () => {
   queuePaused = false;
   const settings = await readSettings();
 
+  const runId = randomUUID();
+  const runStartedAt = new Date().toISOString();
+
   activeRun = {
-    runId: randomUUID(),
-    startedAt: new Date().toISOString(),
+    runId,
+    startedAt: runStartedAt,
     total: queue.filter((item) => item.status === 'pending').length,
     done: 0,
     failed: 0,
@@ -548,6 +587,13 @@ ipcMain.handle('queue:start', async () => {
     writeRunLog: Boolean(settings.writeRunLog),
     logOutputDirectory: settings.outputDirectory
   };
+
+  for (const item of queue) {
+    if (item.status === 'pending') {
+      item.batchId = runId;
+      item.batchStartedAt = runStartedAt;
+    }
+  }
 
   appendLog({ level: 'info', event: 'queue.started', message: 'Queue start requested.' });
 
@@ -609,7 +655,12 @@ ipcMain.handle('queue:cancelCurrent', () => {
 });
 
 ipcMain.handle('queue:openOutputFolder', async (_event, id: string) => {
-  const item = queue.find((entry) => entry.id === id);
+  const fromQueue = queue.find((entry) => entry.id === id);
+  const fromArchive = archiveBatches
+    .flatMap((batch) => batch.items)
+    .find((entry) => entry.id === id);
+
+  const item = fromQueue ?? fromArchive;
   if (!item || item.status !== 'done') {
     return { ok: false as const };
   }
