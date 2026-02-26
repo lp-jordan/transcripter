@@ -32,6 +32,7 @@ export type QueueItem = {
   outputFiles?: string[];
   batchId?: string;
   batchStartedAt?: string;
+  elapsedMs?: number;
 };
 
 export type ArchiveBatch = {

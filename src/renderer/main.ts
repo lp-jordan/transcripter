@@ -49,6 +49,7 @@ let showConsole = false;
 const appLogs: AppLogEntry[] = [];
 const MAX_CONSOLE_LINES = 200;
 let activeJobStartedAt = 0;
+let activeJobElapsedMs = 0;
 let activeJobTimer: ReturnType<typeof window.setInterval> | null = null;
 
 const formatElapsedTime = (elapsedMs: number): string => {
@@ -73,12 +74,29 @@ const updateQueueFooter = () => {
 
   queueJobCounter.textContent = `Job ${currentJobNumber} / ${totalJobs}`;
 
-  const hasActiveTimer = queueState.hasRunningJob && queueState.activeJobId !== null && activeJobStartedAt > 0;
-  queueElapsedCounter.textContent = hasActiveTimer ? `Elapsed ${formatElapsedTime(Date.now() - activeJobStartedAt)}` : 'Elapsed --:--';
+  const hasActiveJob = queueState.hasRunningJob && queueState.activeJobId !== null;
+  const liveElapsed = hasActiveJob && activeJobStartedAt > 0 ? Date.now() - activeJobStartedAt : 0;
+  const elapsedMs = activeJobElapsedMs + liveElapsed;
+  queueElapsedCounter.textContent = hasActiveJob ? `Elapsed ${formatElapsedTime(elapsedMs)}` : 'Elapsed --:--';
 };
 
 const syncActiveJobTimer = () => {
   if (queueState.hasRunningJob && queueState.activeJobId) {
+    if (queueState.isPaused) {
+      if (activeJobStartedAt > 0) {
+        activeJobElapsedMs += Math.max(0, Date.now() - activeJobStartedAt);
+        activeJobStartedAt = 0;
+      }
+
+      if (activeJobTimer !== null) {
+        window.clearInterval(activeJobTimer);
+        activeJobTimer = null;
+      }
+
+      updateQueueFooter();
+      return;
+    }
+
     if (activeJobStartedAt === 0) {
       activeJobStartedAt = Date.now();
     }
@@ -94,6 +112,7 @@ const syncActiveJobTimer = () => {
   }
 
   activeJobStartedAt = 0;
+  activeJobElapsedMs = 0;
   if (activeJobTimer !== null) {
     window.clearInterval(activeJobTimer);
     activeJobTimer = null;
@@ -312,6 +331,9 @@ const createQueueItem = (item: QueueState['items'][number]): HTMLLIElement => {
 };
 
 
+
+const formatElapsedWithLabel = (elapsedMs: number): string => `Elapsed ${formatElapsedTime(elapsedMs)}`;
+
 const formatBatchTime = (iso: string) => {
   const date = new Date(iso);
   return {
@@ -338,7 +360,8 @@ const createArchiveBatchItem = (batch: ArchiveBatch): HTMLLIElement => {
   const summary = document.createElement('summary');
 
   const startedAt = formatBatchTime(batch.startedAt);
-  summary.textContent = `${startedAt.time} — ${batch.items.length} file${batch.items.length === 1 ? '' : 's'}`;
+  const batchElapsedMs = batch.items.reduce((total, item) => total + (item.elapsedMs ?? 0), 0);
+  summary.textContent = `${startedAt.time} — ${batch.items.length} file${batch.items.length === 1 ? '' : 's'} • ${formatElapsedWithLabel(batchElapsedMs)}`;
 
   const files = document.createElement('ul');
   files.className = 'archive-file-list';
@@ -357,6 +380,10 @@ const createArchiveBatchItem = (batch: ArchiveBatch): HTMLLIElement => {
     name.textContent = getFileName(item.sourcePath);
     name.title = item.sourcePath;
 
+    const elapsed = document.createElement('span');
+    elapsed.className = 'archive-file-elapsed';
+    elapsed.textContent = formatElapsedWithLabel(item.elapsedMs ?? 0);
+
     const openOutput = document.createElement('button');
     openOutput.type = 'button';
     openOutput.className = 'button-secondary archive-open-output';
@@ -366,7 +393,7 @@ const createArchiveBatchItem = (batch: ArchiveBatch): HTMLLIElement => {
       void window.transcripter.queue.openOutputFolder(item.id);
     });
 
-    fileRow.append(status, name, openOutput);
+    fileRow.append(status, name, elapsed, openOutput);
     files.append(fileRow);
   }
 
@@ -637,7 +664,8 @@ const bootstrap = async () => {
     queueState = nextState;
 
     if (queueState.activeJobId !== previousActiveJobId) {
-      activeJobStartedAt = queueState.activeJobId ? Date.now() : 0;
+      activeJobElapsedMs = 0;
+      activeJobStartedAt = queueState.activeJobId && !queueState.isPaused ? Date.now() : 0;
     }
 
     selectedIds.forEach((id) => {
