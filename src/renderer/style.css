@@ -264,12 +264,21 @@ h1 {
   display: grid;
   gap: 0.3rem;
   min-height: 10rem;
-  overflow-y: visible;
+  max-height: 24rem;
+  overflow-y: auto;
   padding-right: 0.2rem;
 }
 
 .clear-completed {
   justify-self: end;
+}
+
+.queue-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: #94a3b8;
+  font-size: 0.76rem;
 }
 
 .queue-item {

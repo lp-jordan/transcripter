@@ -33,6 +33,8 @@ const consolePanel = document.getElementById('console-panel') as HTMLElement;
 const consoleOutput = document.getElementById('console-output') as HTMLPreElement;
 const archiveList = document.getElementById('archive-list') as HTMLUListElement;
 const archiveEmptyMessage = document.getElementById('archive-empty-message') as HTMLParagraphElement;
+const queueJobCounter = document.getElementById('queue-job-counter') as HTMLElement;
+const queueElapsedCounter = document.getElementById('queue-elapsed-counter') as HTMLElement;
 
 const selectedIds = new Set<string>();
 let queueState: QueueState = {
@@ -46,6 +48,73 @@ let queueState: QueueState = {
 let showConsole = false;
 const appLogs: AppLogEntry[] = [];
 const MAX_CONSOLE_LINES = 200;
+let activeJobStartedAt = 0;
+let activeJobTimer: ReturnType<typeof window.setInterval> | null = null;
+
+const formatElapsedTime = (elapsedMs: number): string => {
+  const totalSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  }
+
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+};
+
+const updateQueueFooter = () => {
+  const totalJobs = queueState.items.length;
+  const activeJobIndex = queueState.activeJobId
+    ? queueState.items.findIndex((item) => item.id === queueState.activeJobId)
+    : -1;
+  const currentJobNumber = activeJobIndex >= 0 ? activeJobIndex + 1 : 0;
+
+  queueJobCounter.textContent = `Job ${currentJobNumber} / ${totalJobs}`;
+
+  const hasActiveTimer = queueState.hasRunningJob && queueState.activeJobId !== null && activeJobStartedAt > 0;
+  queueElapsedCounter.textContent = hasActiveTimer ? `Elapsed ${formatElapsedTime(Date.now() - activeJobStartedAt)}` : 'Elapsed --:--';
+};
+
+const syncActiveJobTimer = () => {
+  if (queueState.hasRunningJob && queueState.activeJobId) {
+    if (activeJobStartedAt === 0) {
+      activeJobStartedAt = Date.now();
+    }
+
+    if (activeJobTimer === null) {
+      activeJobTimer = window.setInterval(() => {
+        updateQueueFooter();
+      }, 1000);
+    }
+
+    updateQueueFooter();
+    return;
+  }
+
+  activeJobStartedAt = 0;
+  if (activeJobTimer !== null) {
+    window.clearInterval(activeJobTimer);
+    activeJobTimer = null;
+  }
+
+  updateQueueFooter();
+};
+
+let fitWindowTimer: ReturnType<typeof setTimeout> | null = null;
+
+const requestWindowFitToContent = () => {
+  if (fitWindowTimer) {
+    clearTimeout(fitWindowTimer);
+  }
+
+  fitWindowTimer = setTimeout(() => {
+    fitWindowTimer = null;
+    const contentHeight = document.documentElement.scrollHeight;
+    void window.transcripter.window.fitContent(contentHeight);
+  }, 80);
+};
 
 let fitWindowTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -139,6 +208,7 @@ const renderConsole = () => {
 
   consoleOutput.textContent = appLogs.map(formatLogEntry).join('\n');
   consoleOutput.scrollTop = consoleOutput.scrollHeight;
+  requestWindowFitToContent();
 };
 
 const pushLog = (entry: AppLogEntry) => {
@@ -363,6 +433,7 @@ const renderQueue = () => {
 
   queueEmptyMessage.hidden = queueState.items.length > 0;
   updateButtons();
+  updateQueueFooter();
   renderArchive();
   requestWindowFitToContent();
 };
@@ -432,8 +503,13 @@ dropZone.addEventListener('drop', async (event: DragEvent) => {
 
   const filePaths = [...(event.dataTransfer?.files ?? [])]
     .flatMap((file) => {
-      const candidate = (file as File & { path?: string }).path;
-      return typeof candidate === 'string' && candidate.length > 0 ? [candidate] : [];
+      const directPath = (file as File & { path?: string }).path;
+      if (typeof directPath === 'string' && directPath.length > 0) {
+        return [directPath];
+      }
+
+      const fallbackPath = window.transcripter.queue.getPathForFile(file);
+      return fallbackPath.length > 0 ? [fallbackPath] : [];
     });
 
   const uriList = event.dataTransfer?.getData('text/uri-list') ?? '';
@@ -571,17 +647,27 @@ const bootstrap = async () => {
   });
 
   window.transcripter.queue.onState((nextState) => {
+    const previousActiveJobId = queueState.activeJobId;
     queueState = nextState;
+
+    if (queueState.activeJobId !== previousActiveJobId) {
+      activeJobStartedAt = queueState.activeJobId ? Date.now() : 0;
+    }
+
     selectedIds.forEach((id) => {
       if (!queueState.items.some((item) => item.id === id) || id === queueState.activeJobId) {
         selectedIds.delete(id);
       }
     });
+
+    syncActiveJobTimer();
     renderQueue();
   });
 
   renderConsole();
   await refreshQueueState();
+  syncActiveJobTimer();
+  window.addEventListener('resize', requestWindowFitToContent);
 };
 
 void bootstrap();
