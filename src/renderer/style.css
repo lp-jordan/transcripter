@@ -562,7 +562,7 @@ button:disabled {
 
 .archive-file-item {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   gap: 0.45rem;
   align-items: center;
 }
@@ -577,6 +577,13 @@ button:disabled {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 0.82rem;
+}
+
+
+.archive-file-elapsed {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  white-space: nowrap;
 }
 
 .archive-open-output {
