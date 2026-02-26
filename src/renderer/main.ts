@@ -3,6 +3,7 @@ import type { AppLogEntry, QueueState } from '../preload/preload';
 
 const dropZone = document.getElementById('drop-zone') as HTMLDivElement;
 const queueList = document.getElementById('queue-list') as HTMLUListElement;
+const queueEmptyMessage = document.getElementById('queue-empty-message') as HTMLParagraphElement;
 const settingsForm = document.getElementById('settings-form') as HTMLFormElement;
 const outputDirectoryInput = document.getElementById('output-directory') as HTMLInputElement;
 const pickOutputDirectoryButton = document.getElementById('pick-output-directory') as HTMLButtonElement;
@@ -246,6 +247,8 @@ const renderQueue = () => {
   for (const item of queueState.items) {
     queueList.append(createQueueItem(item));
   }
+
+  queueEmptyMessage.hidden = queueState.items.length > 0;
   updateButtons();
 };
 
