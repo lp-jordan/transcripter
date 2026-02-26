@@ -47,6 +47,20 @@ let showConsole = false;
 const appLogs: AppLogEntry[] = [];
 const MAX_CONSOLE_LINES = 200;
 
+let fitWindowTimer: ReturnType<typeof setTimeout> | null = null;
+
+const requestWindowFitToContent = () => {
+  if (fitWindowTimer) {
+    clearTimeout(fitWindowTimer);
+  }
+
+  fitWindowTimer = setTimeout(() => {
+    fitWindowTimer = null;
+    const contentHeight = document.documentElement.scrollHeight;
+    void window.transcripter.window.fitContent(contentHeight);
+  }, 80);
+};
+
 const formatStatusLabel = (status: string): string =>
   status
     .split('_')
@@ -350,6 +364,7 @@ const renderQueue = () => {
   queueEmptyMessage.hidden = queueState.items.length > 0;
   updateButtons();
   renderArchive();
+  requestWindowFitToContent();
 };
 
 const refreshQueueState = async () => {
