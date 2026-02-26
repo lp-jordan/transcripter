@@ -1,4 +1,3 @@
-import { createInterface } from 'node:readline';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
@@ -173,16 +172,38 @@ const ensureNotCanceled = (jobId: string) => {
   }
 };
 
+const forwardStreamLines = (
+  stream: NodeJS.ReadableStream,
+  onLine?: (line: string) => void
+) => {
+  let bufferedChunk = '';
+
+  stream.on('data', (chunk: Buffer | string) => {
+    bufferedChunk += chunk.toString();
+    const parts = bufferedChunk.split(/\r\n|\n|\r/g);
+    bufferedChunk = parts.pop() ?? '';
+
+    for (const part of parts) {
+      if (part) {
+        onLine?.(part);
+      }
+    }
+  });
+
+  stream.on('end', () => {
+    if (bufferedChunk) {
+      onLine?.(bufferedChunk);
+    }
+  });
+};
+
 const runChildProcess = async (jobId: string, command: string, args: string[], onLine?: (line: string) => void): Promise<void> =>
   new Promise((resolve, reject) => {
     const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] });
     activeProcesses.set(jobId, child);
 
-    const stdout = createInterface({ input: child.stdout });
-    const stderr = createInterface({ input: child.stderr });
-
-    stdout.on('line', (line) => onLine?.(line));
-    stderr.on('line', (line) => onLine?.(line));
+    forwardStreamLines(child.stdout, onLine);
+    forwardStreamLines(child.stderr, onLine);
 
     child.on('error', (error) => {
       activeProcesses.delete(jobId);
