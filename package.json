@@ -60,7 +60,8 @@
           ]
         }
       ],
-      "category": "public.app-category.productivity"
+      "category": "public.app-category.productivity",
+      "icon": "build/icons/icon.png"
     },
     "win": {
       "target": [
@@ -78,7 +79,8 @@
             "arm64"
           ]
         }
-      ]
+      ],
+      "icon": "build/icons/icon.ico"
     },
     "nsis": {
       "oneClick": false,
@@ -127,8 +129,10 @@
           ]
         }
       ],
-      "category": "Utility"
-    }
+      "category": "Utility",
+      "icon": "build/icons/icon.png"
+    },
+    "icon": "build/icons/icon.png"
   },
   "dependencies": {
     "ffmpeg-static": "^5.2.0",
