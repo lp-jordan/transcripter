@@ -35,6 +35,7 @@ const processor = new ProcessorClient(ffmpegRuntime.resolvedPath, whisperRuntime
 let activeJobId: string | null = null;
 let queuePaused = false;
 const appLogs: AppLogEntry[] = [];
+const activeJobStartedAtById = new Map<string, number>();
 
 type RunSummary = {
   runId: string;
@@ -106,11 +107,18 @@ const sanitizeArchiveBatches = (value: unknown): ArchiveBatch[] => {
       continue;
     }
 
+    const items = candidate.items
+      .filter((item): item is QueueItem => Boolean(item && typeof item === 'object'))
+      .map((item) => ({
+        ...item,
+        elapsedMs: typeof item.elapsedMs === 'number' && Number.isFinite(item.elapsedMs) ? item.elapsedMs : 0
+      }));
+
     batches.push({
       id: candidate.id,
       startedAt: candidate.startedAt,
       archivedAt: candidate.archivedAt,
-      items: candidate.items
+      items
     });
   }
 
@@ -357,6 +365,23 @@ const queueItemToJob = (item: QueueItem): ProcessingJob => ({
   outputOptions: item.outputOptions
 });
 
+const startElapsedTiming = (itemId: string) => {
+  activeJobStartedAtById.set(itemId, Date.now());
+};
+
+const finalizeElapsedTiming = (item: QueueItem): number => {
+  const startedAt = activeJobStartedAtById.get(item.id);
+  activeJobStartedAtById.delete(item.id);
+
+  if (!startedAt) {
+    return item.elapsedMs ?? 0;
+  }
+
+  const elapsedMs = Math.max(0, Date.now() - startedAt);
+  item.elapsedMs = elapsedMs;
+  return elapsedMs;
+};
+
 const findNextPending = () => queue.find((item) => item.status === 'pending');
 
 const processNextPending = async () => {
@@ -372,6 +397,7 @@ const processNextPending = async () => {
   }
 
   activeJobId = next.id;
+  startElapsedTiming(next.id);
   appendLog({
     level: 'info',
     event: 'job.started',
@@ -381,6 +407,7 @@ const processNextPending = async () => {
   });
   const runtimeError = await validateRuntimeForModel(next.model);
   if (runtimeError) {
+    activeJobStartedAtById.delete(next.id);
     activeJobId = null;
     queuePaused = true;
     if (activeRun) {
@@ -448,6 +475,7 @@ processor.on('complete', async (payload) => {
     item.status = 'done';
     item.progress = 100;
     item.error = undefined;
+    finalizeElapsedTiming(item);
     if (activeRun) {
       activeRun.done += 1;
     }
@@ -463,6 +491,7 @@ processor.on('complete', async (payload) => {
     item.status = 'failed';
     item.progress = 0;
     item.error = error instanceof Error ? error.message : String(error);
+    finalizeElapsedTiming(item);
     if (activeRun) {
       activeRun.failed += 1;
     }
@@ -494,6 +523,7 @@ processor.on('error', (payload) => {
   item.status = payload.canceled ? 'canceled' : 'failed';
   item.error = payload.error;
   item.progress = payload.canceled ? item.progress : 0;
+  finalizeElapsedTiming(item);
   if (activeRun) {
     if (payload.canceled) {
       activeRun.canceled += 1;
@@ -586,7 +616,8 @@ ipcMain.handle('queue:add', async (_event, sourcePaths: string[]) => {
       model: settings.model,
       language: settings.language,
       status: 'pending',
-      progress: 0
+      progress: 0,
+      elapsedMs: 0
     });
   }
 
