@@ -13,7 +13,7 @@ const txtOutputCheckbox = document.getElementById('format-txt') as HTMLInputElem
 const timecodedTxtOutputCheckbox = document.getElementById('format-timecoded-txt') as HTMLInputElement;
 const srtOutputCheckbox = document.getElementById('format-srt') as HTMLInputElement;
 const vttOutputCheckbox = document.getElementById('format-vtt') as HTMLInputElement;
-const jsonOutputCheckbox = document.getElementById('format-json') as HTMLInputElement;
+
 
 const addFilesButton = document.getElementById('add-files') as HTMLButtonElement;
 const removeSelectedButton = document.getElementById('remove-selected') as HTMLButtonElement;
@@ -23,6 +23,9 @@ const queuePrimaryButton = document.getElementById('queue-primary') as HTMLButto
 const cancelCurrentButton = document.getElementById('cancel-current') as HTMLButtonElement;
 const overflowTriggerButton = document.getElementById('overflow-trigger') as HTMLButtonElement;
 const overflowMenu = document.getElementById('overflow-menu') as HTMLDivElement;
+const settingsTriggerButton = document.getElementById('settings-trigger') as HTMLButtonElement;
+const settingsMenu = document.getElementById('settings-menu') as HTMLElement;
+const settingsBackButton = document.getElementById('settings-back') as HTMLButtonElement;
 const toggleConsoleButton = document.getElementById('toggle-console') as HTMLButtonElement;
 const consolePanel = document.getElementById('console-panel') as HTMLElement;
 const consoleOutput = document.getElementById('console-output') as HTMLPreElement;
@@ -90,6 +93,11 @@ const updateButtons = () => {
 const setOverflowMenuOpen = (isOpen: boolean) => {
   overflowMenu.hidden = !isOpen;
   overflowTriggerButton.setAttribute('aria-expanded', String(isOpen));
+};
+
+const setSettingsMenuOpen = (isOpen: boolean) => {
+  settingsMenu.hidden = !isOpen;
+  settingsTriggerButton.setAttribute('aria-expanded', String(isOpen));
 };
 
 const formatLogEntry = (entry: AppLogEntry): string => {
@@ -271,7 +279,6 @@ const applySettingsToUi = (settings: Awaited<ReturnType<typeof window.transcript
   timecodedTxtOutputCheckbox.checked = settings.outputOptions.timecodedTxt;
   srtOutputCheckbox.checked = settings.outputOptions.srt;
   vttOutputCheckbox.checked = settings.outputOptions.vtt;
-  jsonOutputCheckbox.checked = settings.outputOptions.json;
 };
 
 const saveSettings = async () => {
@@ -285,7 +292,7 @@ const saveSettings = async () => {
       timecodedTxt: timecodedTxtOutputCheckbox.checked,
       srt: srtOutputCheckbox.checked,
       vtt: vttOutputCheckbox.checked,
-      json: jsonOutputCheckbox.checked
+      json: false
     }
   });
 
@@ -379,7 +386,17 @@ cancelCurrentButton.addEventListener('click', async () => {
 });
 
 overflowTriggerButton.addEventListener('click', () => {
+  setSettingsMenuOpen(false);
   setOverflowMenuOpen(overflowMenu.hidden);
+});
+
+settingsTriggerButton.addEventListener('click', () => {
+  setOverflowMenuOpen(false);
+  setSettingsMenuOpen(settingsMenu.hidden);
+});
+
+settingsBackButton.addEventListener('click', () => {
+  setSettingsMenuOpen(false);
 });
 
 document.addEventListener('click', (event) => {
@@ -387,12 +404,16 @@ document.addEventListener('click', (event) => {
     return;
   }
 
-  if (overflowMenu.hidden) {
-    return;
+  const shouldCloseOverflowMenu =
+    !overflowMenu.hidden && !overflowMenu.contains(event.target) && !overflowTriggerButton.contains(event.target);
+  if (shouldCloseOverflowMenu) {
+    setOverflowMenuOpen(false);
   }
 
-  if (!overflowMenu.contains(event.target) && !overflowTriggerButton.contains(event.target)) {
-    setOverflowMenuOpen(false);
+  const shouldCloseSettingsMenu =
+    !settingsMenu.hidden && !settingsMenu.contains(event.target) && !settingsTriggerButton.contains(event.target);
+  if (shouldCloseSettingsMenu) {
+    setSettingsMenuOpen(false);
   }
 });
 
@@ -430,8 +451,7 @@ for (const element of [
   txtOutputCheckbox,
   timecodedTxtOutputCheckbox,
   srtOutputCheckbox,
-  vttOutputCheckbox,
-  jsonOutputCheckbox
+  vttOutputCheckbox
 ]) {
   element.addEventListener('change', () => {
     void saveSettings();
