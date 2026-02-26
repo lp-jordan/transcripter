@@ -48,6 +48,9 @@ const api = {
         ipcRenderer.removeListener('app-log:entry', wrapped);
       };
     }
+  },
+  window: {
+    fitContent: (contentHeight: number): Promise<{ ok: boolean }> => ipcRenderer.invoke('window:fit-content', contentHeight)
   }
 };
 
