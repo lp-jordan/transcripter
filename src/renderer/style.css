@@ -16,7 +16,20 @@ body {
 }
 
 h1 {
-  margin-bottom: 0;
+  margin: 0;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.app-header-logo {
+  height: 2rem;
+  width: auto;
+  object-fit: contain;
+  display: block;
 }
 
 .section-title {
