@@ -20,10 +20,10 @@ const addFilesButton = document.getElementById('add-files') as HTMLButtonElement
 const removeSelectedButton = document.getElementById('remove-selected') as HTMLButtonElement;
 const clearCompletedButton = document.getElementById('clear-completed') as HTMLButtonElement;
 const selectAllQueuedClipsCheckbox = document.getElementById('select-all-queued-clips') as HTMLInputElement;
+const selectAllLabel = document.getElementById('select-all-label') as HTMLSpanElement;
 const queuePrimaryButton = document.getElementById('queue-primary') as HTMLButtonElement;
-const cancelCurrentButton = document.getElementById('cancel-current') as HTMLButtonElement;
-const overflowTriggerButton = document.getElementById('overflow-trigger') as HTMLButtonElement;
-const overflowMenu = document.getElementById('overflow-menu') as HTMLDivElement;
+const pauseToggleButton = document.getElementById('pause-toggle') as HTMLButtonElement;
+const stopCurrentButton = document.getElementById('stop-current') as HTMLButtonElement;
 const settingsTriggerButton = document.getElementById('settings-trigger') as HTMLButtonElement;
 const settingsMenu = document.getElementById('settings-menu') as HTMLElement;
 const settingsBackButton = document.getElementById('settings-back') as HTMLButtonElement;
@@ -76,24 +76,19 @@ const updateButtons = () => {
 
   removeSelectedButton.disabled = selectedQueueItems.length === 0;
   clearCompletedButton.disabled = queueState.items.every((item) => item.status !== 'done' && item.status !== 'failed');
-  cancelCurrentButton.disabled = !queueState.hasRunningJob;
+  stopCurrentButton.disabled = !queueState.hasRunningJob;
+  pauseToggleButton.disabled = !queueState.hasRunningJob;
+  pauseToggleButton.textContent = queueState.isPaused ? '▶' : '⏸';
+  pauseToggleButton.setAttribute('aria-label', queueState.isPaused ? 'Resume queue' : 'Pause queue');
 
   selectAllQueuedClipsCheckbox.disabled = selectableQueueItems.length === 0;
   selectAllQueuedClipsCheckbox.checked = allSelectableQueueItemsAreSelected;
   selectAllQueuedClipsCheckbox.indeterminate =
     selectedQueueItems.length > 0 && !allSelectableQueueItemsAreSelected;
+  selectAllLabel.textContent = allSelectableQueueItemsAreSelected ? 'Deselect All' : 'Select All';
 
-  queuePrimaryButton.disabled = !canProcessQueue;
-  if (queueState.hasRunningJob) {
-    queuePrimaryButton.textContent = queueState.isPaused ? 'Resume' : 'Pause';
-  } else {
-    queuePrimaryButton.textContent = 'Start';
-  }
-};
-
-const setOverflowMenuOpen = (isOpen: boolean) => {
-  overflowMenu.hidden = !isOpen;
-  overflowTriggerButton.setAttribute('aria-expanded', String(isOpen));
+  queuePrimaryButton.disabled = !canProcessQueue || queueState.hasRunningJob;
+  queuePrimaryButton.textContent = 'Start';
 };
 
 const setSettingsMenuOpen = (isOpen: boolean) => {
@@ -368,33 +363,30 @@ selectAllQueuedClipsCheckbox.addEventListener('change', () => {
 });
 
 queuePrimaryButton.addEventListener('click', async () => {
-  if (queueState.hasRunningJob) {
-    if (queueState.isPaused) {
-      await window.transcripter.queue.resume();
-      return;
-    }
-
-    await window.transcripter.queue.pause();
-    return;
-  }
-
   const result = await window.transcripter.queue.start();
   if (!result.ok && result.error) {
     window.alert(result.error);
   }
 });
 
-cancelCurrentButton.addEventListener('click', async () => {
+pauseToggleButton.addEventListener('click', async () => {
+  if (!queueState.hasRunningJob) {
+    return;
+  }
+
+  if (queueState.isPaused) {
+    await window.transcripter.queue.resume();
+    return;
+  }
+
+  await window.transcripter.queue.pause();
+});
+
+stopCurrentButton.addEventListener('click', async () => {
   await window.transcripter.queue.cancelCurrent();
 });
 
-overflowTriggerButton.addEventListener('click', () => {
-  setSettingsMenuOpen(false);
-  setOverflowMenuOpen(overflowMenu.hidden);
-});
-
 settingsTriggerButton.addEventListener('click', () => {
-  setOverflowMenuOpen(false);
   setSettingsMenuOpen(settingsMenu.hidden);
 });
 
@@ -407,25 +399,11 @@ document.addEventListener('click', (event) => {
     return;
   }
 
-  const shouldCloseOverflowMenu =
-    !overflowMenu.hidden && !overflowMenu.contains(event.target) && !overflowTriggerButton.contains(event.target);
-  if (shouldCloseOverflowMenu) {
-    setOverflowMenuOpen(false);
-  }
-
   const shouldCloseSettingsMenu =
     !settingsMenu.hidden && !settingsMenu.contains(event.target) && !settingsTriggerButton.contains(event.target);
   if (shouldCloseSettingsMenu) {
     setSettingsMenuOpen(false);
   }
-});
-
-removeSelectedButton.addEventListener('click', () => {
-  setOverflowMenuOpen(false);
-});
-
-clearCompletedButton.addEventListener('click', () => {
-  setOverflowMenuOpen(false);
 });
 
 toggleConsoleButton.addEventListener('click', () => {
