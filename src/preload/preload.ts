@@ -1,8 +1,9 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { AppLogEntry, AppSettings, QueueItem } from '../main/types';
+import type { AppLogEntry, AppSettings, ArchiveBatch, QueueItem } from '../main/types';
 
 export type QueueState = {
   items: QueueItem[];
+  archiveBatches: ArchiveBatch[];
   activeJobId: string | null;
   hasRunningJob: boolean;
   isPaused: boolean;
@@ -18,7 +19,7 @@ const api = {
     add: (sourcePaths: string[]): Promise<{ ok: true }> => ipcRenderer.invoke('queue:add', sourcePaths),
     list: (): Promise<QueueState> => ipcRenderer.invoke('queue:list'),
     removeSelected: (ids: string[]): Promise<{ ok: true }> => ipcRenderer.invoke('queue:removeSelected', ids),
-    clearCompleted: (): Promise<{ ok: true }> => ipcRenderer.invoke('queue:clearCompleted'),
+    archiveCompleted: (): Promise<{ ok: true }> => ipcRenderer.invoke('queue:archiveCompleted'),
     start: (): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('queue:start'),
     pause: (): Promise<{ ok: true }> => ipcRenderer.invoke('queue:pause'),
     resume: (): Promise<{ ok: true }> => ipcRenderer.invoke('queue:resume'),

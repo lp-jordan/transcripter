@@ -472,3 +472,93 @@ button:disabled {
   line-height: 1.5;
   white-space: pre-wrap;
 }
+
+
+.archive-window {
+  margin-top: 0.9rem;
+  border: 1px solid #334155;
+  background: #0b1220;
+  border-radius: 10px;
+  padding: 0.7rem;
+}
+
+.archive-empty-message {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 0.84rem;
+}
+
+.archive-list,
+.archive-day-list,
+.archive-file-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.archive-list {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 0.45rem;
+}
+
+.archive-day-group {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.archive-day-title {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #93c5fd;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.archive-day-list {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.archive-batch details {
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #111827;
+  padding: 0.45rem 0.55rem;
+}
+
+.archive-batch summary {
+  cursor: pointer;
+  color: #e2e8f0;
+  font-size: 0.85rem;
+}
+
+.archive-file-list {
+  margin-top: 0.4rem;
+  display: grid;
+  gap: 0.3rem;
+}
+
+.archive-file-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.archive-status-icon {
+  width: 1.2rem;
+  text-align: center;
+}
+
+.archive-file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.82rem;
+}
+
+.archive-open-output {
+  font-size: 0.72rem;
+  padding: 0.3rem 0.45rem;
+}
