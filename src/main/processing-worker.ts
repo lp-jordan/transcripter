@@ -1,4 +1,5 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, type ChildProcessByStdio } from 'node:child_process';
+import type { Readable } from 'node:stream';
 import { createHash } from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
 import fs from 'node:fs/promises';
@@ -13,7 +14,7 @@ import type {
 import { clampActiveTranscriptionProgress, parseWhisperTranscriptionProgress } from './whisper-progress';
 
 const canceledJobs = new Set<string>();
-const activeProcesses = new Map<string, ChildProcessWithoutNullStreams>();
+const activeProcesses = new Map<string, ChildProcessByStdio<null, Readable, Readable>>();
 const ffmpegPath = process.env.TRANSCRIPTER_FFMPEG_PATH;
 const whisperPath = process.env.TRANSCRIPTER_WHISPER_PATH;
 const whisperModelDirectory = process.env.TRANSCRIPTER_WHISPER_MODEL_DIR;
