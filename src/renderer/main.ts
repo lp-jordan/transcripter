@@ -147,7 +147,7 @@ const updateButtons = () => {
   const selectedQueueItems = selectableQueueItems.filter((item) => selectedIds.has(item.id));
   const allSelectableQueueItemsAreSelected = selectableQueueItems.length > 0 && selectedQueueItems.length === selectableQueueItems.length;
 
-  removeSelectedButton.disabled = selectedQueueItems.length === 0;
+  removeSelectedButton.disabled = selectedQueueItems.length === 0 || queueState.hasRunningJob;
   archiveCompletedButton.disabled = queueState.items.every((item) => !['done', 'failed', 'canceled'].includes(item.status));
   stopCurrentButton.disabled = !queueState.hasRunningJob;
   pauseToggleButton.disabled = !queueState.hasRunningJob;
@@ -518,7 +518,14 @@ addFilesButton.addEventListener('click', async () => {
 });
 
 removeSelectedButton.addEventListener('click', async () => {
-  await window.transcripter.queue.removeSelected([...selectedIds]);
+  const result = await window.transcripter.queue.removeSelected([...selectedIds]);
+  if (!result.ok) {
+    if (result.error) {
+      window.alert(result.error);
+    }
+    return;
+  }
+
   selectedIds.clear();
 });
 

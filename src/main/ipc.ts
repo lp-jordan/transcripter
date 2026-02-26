@@ -608,6 +608,13 @@ ipcMain.handle('queue:pickFiles', async () => {
 });
 
 ipcMain.handle('queue:removeSelected', (_event, ids: string[]) => {
+  if (activeJobId) {
+    return {
+      ok: false as const,
+      error: 'Pause or stop active transcription jobs before removing files from the queue.'
+    };
+  }
+
   const next = queue.filter((item) => !ids.includes(item.id) && item.id !== activeJobId);
   queue.length = 0;
   queue.push(...next);
