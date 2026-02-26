@@ -1,4 +1,5 @@
 import './style.css';
+import type { ArchiveBatch } from '../main/types';
 import type { AppLogEntry, QueueState } from '../preload/preload';
 
 const dropZone = document.getElementById('drop-zone') as HTMLDivElement;
@@ -18,7 +19,7 @@ const vttOutputCheckbox = document.getElementById('format-vtt') as HTMLInputElem
 
 const addFilesButton = document.getElementById('add-files') as HTMLButtonElement;
 const removeSelectedButton = document.getElementById('remove-selected') as HTMLButtonElement;
-const clearCompletedButton = document.getElementById('clear-completed') as HTMLButtonElement;
+const archiveCompletedButton = document.getElementById('archive-completed') as HTMLButtonElement;
 const selectAllQueuedClipsCheckbox = document.getElementById('select-all-queued-clips') as HTMLInputElement;
 const selectAllLabel = document.getElementById('select-all-label') as HTMLSpanElement;
 const queuePrimaryButton = document.getElementById('queue-primary') as HTMLButtonElement;
@@ -30,10 +31,13 @@ const settingsBackButton = document.getElementById('settings-back') as HTMLButto
 const toggleConsoleButton = document.getElementById('toggle-console') as HTMLButtonElement;
 const consolePanel = document.getElementById('console-panel') as HTMLElement;
 const consoleOutput = document.getElementById('console-output') as HTMLPreElement;
+const archiveList = document.getElementById('archive-list') as HTMLUListElement;
+const archiveEmptyMessage = document.getElementById('archive-empty-message') as HTMLParagraphElement;
 
 const selectedIds = new Set<string>();
 let queueState: QueueState = {
   items: [],
+  archiveBatches: [],
   activeJobId: null,
   hasRunningJob: false,
   isPaused: false
@@ -75,7 +79,7 @@ const updateButtons = () => {
   const allSelectableQueueItemsAreSelected = selectableQueueItems.length > 0 && selectedQueueItems.length === selectableQueueItems.length;
 
   removeSelectedButton.disabled = selectedQueueItems.length === 0;
-  clearCompletedButton.disabled = queueState.items.every((item) => item.status !== 'done' && item.status !== 'failed');
+  archiveCompletedButton.disabled = queueState.items.every((item) => !['done', 'failed', 'canceled'].includes(item.status));
   stopCurrentButton.disabled = !queueState.hasRunningJob;
   pauseToggleButton.disabled = !queueState.hasRunningJob;
   pauseToggleButton.textContent = queueState.isPaused ? '▶' : '⏸';
@@ -237,6 +241,106 @@ const createQueueItem = (item: QueueState['items'][number]): HTMLLIElement => {
   return li;
 };
 
+
+const formatBatchTime = (iso: string) => {
+  const date = new Date(iso);
+  return {
+    day: date.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }),
+    time: date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+  };
+};
+
+const statusIconByItemStatus: Record<ArchiveBatch['items'][number]['status'], string> = {
+  pending: '⏳',
+  extracting_audio: '🎧',
+  transcribing: '📝',
+  writing_outputs: '💾',
+  done: '✅',
+  failed: '❌',
+  canceled: '⏹'
+};
+
+const createArchiveBatchItem = (batch: ArchiveBatch): HTMLLIElement => {
+  const li = document.createElement('li');
+  li.className = 'archive-batch';
+
+  const details = document.createElement('details');
+  const summary = document.createElement('summary');
+
+  const startedAt = formatBatchTime(batch.startedAt);
+  summary.textContent = `${startedAt.time} — ${batch.items.length} file${batch.items.length === 1 ? '' : 's'}`;
+
+  const files = document.createElement('ul');
+  files.className = 'archive-file-list';
+
+  for (const item of batch.items) {
+    const fileRow = document.createElement('li');
+    fileRow.className = 'archive-file-item';
+
+    const status = document.createElement('span');
+    status.className = 'archive-status-icon';
+    status.textContent = statusIconByItemStatus[item.status];
+    status.title = formatStatusLabel(item.status);
+
+    const name = document.createElement('span');
+    name.className = 'archive-file-name';
+    name.textContent = getFileName(item.sourcePath);
+    name.title = item.sourcePath;
+
+    const openOutput = document.createElement('button');
+    openOutput.type = 'button';
+    openOutput.className = 'button-secondary archive-open-output';
+    openOutput.textContent = 'Open Output Folder';
+    openOutput.disabled = item.status !== 'done';
+    openOutput.addEventListener('click', () => {
+      void window.transcripter.queue.openOutputFolder(item.id);
+    });
+
+    fileRow.append(status, name, openOutput);
+    files.append(fileRow);
+  }
+
+  details.append(summary, files);
+  li.append(details);
+  li.setAttribute('data-day', startedAt.day);
+  return li;
+};
+
+const renderArchive = () => {
+  archiveList.innerHTML = '';
+
+  const groupedByDay = new Map<string, ArchiveBatch[]>();
+  for (const batch of queueState.archiveBatches) {
+    const { day } = formatBatchTime(batch.startedAt);
+    const existing = groupedByDay.get(day);
+    if (existing) {
+      existing.push(batch);
+    } else {
+      groupedByDay.set(day, [batch]);
+    }
+  }
+
+  for (const [day, batches] of groupedByDay.entries()) {
+    const dayGroup = document.createElement('li');
+    dayGroup.className = 'archive-day-group';
+
+    const title = document.createElement('p');
+    title.className = 'archive-day-title';
+    title.textContent = day;
+
+    const batchList = document.createElement('ul');
+    batchList.className = 'archive-day-list';
+    batches.forEach((batch) => {
+      batchList.append(createArchiveBatchItem(batch));
+    });
+
+    dayGroup.append(title, batchList);
+    archiveList.append(dayGroup);
+  }
+
+  archiveEmptyMessage.hidden = queueState.archiveBatches.length > 0;
+};
+
 const renderQueue = () => {
   queueList.innerHTML = '';
   for (const item of queueState.items) {
@@ -245,6 +349,7 @@ const renderQueue = () => {
 
   queueEmptyMessage.hidden = queueState.items.length > 0;
   updateButtons();
+  renderArchive();
 };
 
 const refreshQueueState = async () => {
@@ -340,8 +445,8 @@ removeSelectedButton.addEventListener('click', async () => {
   selectedIds.clear();
 });
 
-clearCompletedButton.addEventListener('click', async () => {
-  await window.transcripter.queue.clearCompleted();
+archiveCompletedButton.addEventListener('click', async () => {
+  await window.transcripter.queue.archiveCompleted();
 });
 
 selectAllQueuedClipsCheckbox.addEventListener('change', () => {
