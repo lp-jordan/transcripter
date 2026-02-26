@@ -264,7 +264,8 @@ h1 {
   display: grid;
   gap: 0.3rem;
   min-height: 10rem;
-  overflow-y: visible;
+  max-height: 24rem;
+  overflow-y: auto;
   padding-right: 0.2rem;
 }
 
