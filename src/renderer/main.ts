@@ -18,6 +18,7 @@ const jsonOutputCheckbox = document.getElementById('format-json') as HTMLInputEl
 const addFilesButton = document.getElementById('add-files') as HTMLButtonElement;
 const removeSelectedButton = document.getElementById('remove-selected') as HTMLButtonElement;
 const clearCompletedButton = document.getElementById('clear-completed') as HTMLButtonElement;
+const selectAllQueuedClipsCheckbox = document.getElementById('select-all-queued-clips') as HTMLInputElement;
 const queuePrimaryButton = document.getElementById('queue-primary') as HTMLButtonElement;
 const cancelCurrentButton = document.getElementById('cancel-current') as HTMLButtonElement;
 const overflowTriggerButton = document.getElementById('overflow-trigger') as HTMLButtonElement;
@@ -65,10 +66,18 @@ const fileUrlToPath = (value: string): string | null => {
 const updateButtons = () => {
   const hasPendingItems = queueState.items.some((item) => item.status === 'pending');
   const canProcessQueue = queueState.hasRunningJob || hasPendingItems;
+  const selectableQueueItems = queueState.items.filter((item) => item.id !== queueState.activeJobId);
+  const selectedQueueItems = selectableQueueItems.filter((item) => selectedIds.has(item.id));
+  const allSelectableQueueItemsAreSelected = selectableQueueItems.length > 0 && selectedQueueItems.length === selectableQueueItems.length;
 
   removeSelectedButton.disabled = selectedIds.size === 0;
   clearCompletedButton.disabled = queueState.items.every((item) => item.status !== 'done' && item.status !== 'failed');
   cancelCurrentButton.disabled = !queueState.hasRunningJob;
+
+  selectAllQueuedClipsCheckbox.disabled = selectableQueueItems.length === 0;
+  selectAllQueuedClipsCheckbox.checked = allSelectableQueueItemsAreSelected;
+  selectAllQueuedClipsCheckbox.indeterminate =
+    selectedQueueItems.length > 0 && !allSelectableQueueItemsAreSelected;
 
   queuePrimaryButton.disabled = !canProcessQueue;
   if (queueState.hasRunningJob) {
@@ -235,7 +244,7 @@ const renderQueue = () => {
 const refreshQueueState = async () => {
   queueState = await window.transcripter.queue.list();
   selectedIds.forEach((id) => {
-    if (!queueState.items.some((item) => item.id === id)) {
+    if (!queueState.items.some((item) => item.id === id) || id === queueState.activeJobId) {
       selectedIds.delete(id);
     }
   });
@@ -328,6 +337,24 @@ removeSelectedButton.addEventListener('click', async () => {
 
 clearCompletedButton.addEventListener('click', async () => {
   await window.transcripter.queue.clearCompleted();
+});
+
+selectAllQueuedClipsCheckbox.addEventListener('change', () => {
+  const selectableQueueItemIds = queueState.items
+    .filter((item) => item.id !== queueState.activeJobId)
+    .map((item) => item.id);
+
+  if (selectAllQueuedClipsCheckbox.checked) {
+    selectableQueueItemIds.forEach((id) => {
+      selectedIds.add(id);
+    });
+  } else {
+    selectableQueueItemIds.forEach((id) => {
+      selectedIds.delete(id);
+    });
+  }
+
+  renderQueue();
 });
 
 queuePrimaryButton.addEventListener('click', async () => {
@@ -424,6 +451,11 @@ const bootstrap = async () => {
 
   window.transcripter.queue.onState((nextState) => {
     queueState = nextState;
+    selectedIds.forEach((id) => {
+      if (!queueState.items.some((item) => item.id === id) || id === queueState.activeJobId) {
+        selectedIds.delete(id);
+      }
+    });
     renderQueue();
   });
 
