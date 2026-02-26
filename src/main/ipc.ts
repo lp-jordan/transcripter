@@ -727,6 +727,22 @@ ipcMain.handle('queue:archiveCompleted', () => {
   return { ok: true as const };
 });
 
+
+ipcMain.handle('queue:clearArchive', () => {
+  archiveBatches.length = 0;
+  void persistArchiveBatches().catch((error) => {
+    appendLog({
+      level: 'error',
+      event: 'queue.archive_persist_failed',
+      message: `Failed to persist archive batches: ${error instanceof Error ? error.message : String(error)}`
+    });
+  });
+
+  appendLog({ level: 'info', event: 'queue.archive_cleared', message: 'Cleared all archived batches.' });
+  emitQueueState();
+  return { ok: true as const };
+});
+
 ipcMain.handle('queue:start', async () => {
   queuePaused = false;
   const settings = await readSettings();
