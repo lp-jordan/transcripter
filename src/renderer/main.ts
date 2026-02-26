@@ -102,6 +102,20 @@ const syncActiveJobTimer = () => {
   updateQueueFooter();
 };
 
+let fitWindowTimer: ReturnType<typeof setTimeout> | null = null;
+
+const requestWindowFitToContent = () => {
+  if (fitWindowTimer) {
+    clearTimeout(fitWindowTimer);
+  }
+
+  fitWindowTimer = setTimeout(() => {
+    fitWindowTimer = null;
+    const contentHeight = document.documentElement.scrollHeight;
+    void window.transcripter.window.fitContent(contentHeight);
+  }, 80);
+};
+
 const formatStatusLabel = (status: string): string =>
   status
     .split('_')
@@ -180,6 +194,7 @@ const renderConsole = () => {
 
   consoleOutput.textContent = appLogs.map(formatLogEntry).join('\n');
   consoleOutput.scrollTop = consoleOutput.scrollHeight;
+  requestWindowFitToContent();
 };
 
 const pushLog = (entry: AppLogEntry) => {
@@ -406,6 +421,7 @@ const renderQueue = () => {
   updateButtons();
   updateQueueFooter();
   renderArchive();
+  requestWindowFitToContent();
 };
 
 const refreshQueueState = async () => {
@@ -632,6 +648,7 @@ const bootstrap = async () => {
   renderConsole();
   await refreshQueueState();
   syncActiveJobTimer();
+  window.addEventListener('resize', requestWindowFitToContent);
 };
 
 void bootstrap();

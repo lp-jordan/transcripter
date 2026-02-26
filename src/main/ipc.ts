@@ -1,4 +1,4 @@
-import { BrowserWindow, app, dialog, ipcMain, shell } from 'electron';
+import { BrowserWindow, app, dialog, ipcMain, screen, shell } from 'electron';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -98,6 +98,25 @@ const appendLog = (entry: Omit<AppLogEntry, 'timestamp'>) => {
   for (const window of BrowserWindow.getAllWindows()) {
     window.webContents.send('app-log:entry', withTimestamp);
   }
+};
+
+const MIN_CONTENT_HEIGHT = 760;
+const WINDOW_HEIGHT_PADDING = 56;
+
+const ensureWindowCanFitContent = (window: BrowserWindow, requestedContentHeight: number) => {
+  const display = screen.getDisplayMatching(window.getBounds());
+  const maxWindowHeight = display.workAreaSize.height;
+  const [currentWindowWidth, currentWindowHeight] = window.getSize();
+  const desiredWindowHeight = Math.min(
+    Math.max(MIN_CONTENT_HEIGHT, Math.ceil(requestedContentHeight) + WINDOW_HEIGHT_PADDING),
+    maxWindowHeight
+  );
+
+  if (desiredWindowHeight <= currentWindowHeight) {
+    return;
+  }
+
+  window.setSize(currentWindowWidth, desiredWindowHeight);
 };
 
 const withSafePath = async (inputPath: string): Promise<string> => path.resolve(inputPath);
@@ -480,6 +499,20 @@ ipcMain.handle('settings:pickOutputDirectory', async (_event, defaultPath?: stri
 });
 
 ipcMain.handle('app-log:list', () => [...appLogs]);
+
+ipcMain.handle('window:fit-content', (event, requestedContentHeight: number) => {
+  if (typeof requestedContentHeight !== 'number' || !Number.isFinite(requestedContentHeight)) {
+    return { ok: false as const };
+  }
+
+  const window = BrowserWindow.fromWebContents(event.sender);
+  if (!window) {
+    return { ok: false as const };
+  }
+
+  ensureWindowCanFitContent(window, requestedContentHeight);
+  return { ok: true as const };
+});
 
 ipcMain.handle('queue:list', () => ({
   items: [...queue],
