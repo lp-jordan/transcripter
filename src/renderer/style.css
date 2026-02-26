@@ -233,6 +233,9 @@ h1 {
   margin: 0;
   display: grid;
   gap: 0.3rem;
+  max-height: 25rem;
+  overflow-y: auto;
+  padding-right: 0.2rem;
 }
 
 .queue-item {
