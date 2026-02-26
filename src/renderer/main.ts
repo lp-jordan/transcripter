@@ -1,6 +1,7 @@
 import './style.css';
 import type { ArchiveBatch } from '../main/types';
-import type { AppLogEntry, QueueState } from '../preload/preload';
+import type { QueueState } from '../preload/preload';
+import type { AppLogEntry } from '../main/types';
 
 const dropZone = document.getElementById('drop-zone') as HTMLDivElement;
 const queueList = document.getElementById('queue-list') as HTMLUListElement;
@@ -50,7 +51,7 @@ const appLogs: AppLogEntry[] = [];
 const MAX_CONSOLE_LINES = 200;
 let activeJobStartedAt = 0;
 let activeJobElapsedMs = 0;
-let activeJobTimer: ReturnType<typeof window.setInterval> | null = null;
+let activeJobTimer: number | null = null;
 
 const formatElapsedTime = (elapsedMs: number): string => {
   const totalSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
@@ -121,14 +122,14 @@ const syncActiveJobTimer = () => {
   updateQueueFooter();
 };
 
-let fitWindowTimer: ReturnType<typeof setTimeout> | null = null;
+let fitWindowTimer: number | null = null;
 
 const requestWindowFitToContent = () => {
   if (fitWindowTimer) {
     clearTimeout(fitWindowTimer);
   }
 
-  fitWindowTimer = setTimeout(() => {
+  fitWindowTimer = window.setTimeout(() => {
     fitWindowTimer = null;
     const contentHeight = document.documentElement.scrollHeight;
     void window.transcripter.window.fitContent(contentHeight);
