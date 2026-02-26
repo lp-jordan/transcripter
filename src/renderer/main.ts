@@ -417,8 +417,13 @@ dropZone.addEventListener('drop', async (event: DragEvent) => {
 
   const filePaths = [...(event.dataTransfer?.files ?? [])]
     .flatMap((file) => {
-      const candidate = (file as File & { path?: string }).path;
-      return typeof candidate === 'string' && candidate.length > 0 ? [candidate] : [];
+      const directPath = (file as File & { path?: string }).path;
+      if (typeof directPath === 'string' && directPath.length > 0) {
+        return [directPath];
+      }
+
+      const fallbackPath = window.transcripter.queue.getPathForFile(file);
+      return fallbackPath.length > 0 ? [fallbackPath] : [];
     });
 
   const uriList = event.dataTransfer?.getData('text/uri-list') ?? '';
