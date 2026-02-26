@@ -22,6 +22,7 @@ const addFilesButton = document.getElementById('add-files') as HTMLButtonElement
 const removeSelectedButton = document.getElementById('remove-selected') as HTMLButtonElement;
 const resetSelectedButton = document.getElementById('reset-selected') as HTMLButtonElement;
 const archiveCompletedButton = document.getElementById('archive-completed') as HTMLButtonElement;
+const clearArchiveButton = document.getElementById('clear-archive') as HTMLButtonElement;
 const selectAllQueuedClipsCheckbox = document.getElementById('select-all-queued-clips') as HTMLInputElement;
 const selectAllLabel = document.getElementById('select-all-label') as HTMLSpanElement;
 const queuePrimaryButton = document.getElementById('queue-primary') as HTMLButtonElement;
@@ -171,6 +172,7 @@ const updateButtons = () => {
   removeSelectedButton.disabled = selectedQueueItems.length === 0 || queueState.hasRunningJob;
   resetSelectedButton.disabled = selectedQueueItems.length === 0 || queueState.hasRunningJob;
   archiveCompletedButton.disabled = queueState.items.every((item) => !['done', 'failed', 'canceled'].includes(item.status));
+  clearArchiveButton.disabled = queueState.archiveBatches.length === 0;
   stopCurrentButton.disabled = !queueState.hasRunningJob;
   pauseToggleButton.disabled = !queueState.hasRunningJob;
   pauseToggleButton.textContent = queueState.isPaused ? '▶' : '⏸';
@@ -573,6 +575,10 @@ resetSelectedButton.addEventListener('click', async () => {
 
 archiveCompletedButton.addEventListener('click', async () => {
   await window.transcripter.queue.archiveCompleted();
+});
+
+clearArchiveButton.addEventListener('click', async () => {
+  await window.transcripter.queue.clearArchive();
 });
 
 selectAllQueuedClipsCheckbox.addEventListener('change', () => {
