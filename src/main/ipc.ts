@@ -775,12 +775,37 @@ ipcMain.handle('queue:resume', () => {
 });
 
 ipcMain.handle('queue:cancelCurrent', () => {
-  if (!activeJobId) {
-    return { ok: true as const };
+  queuePaused = true;
+
+  const pendingItems = queue.filter((entry) => entry.status === 'pending');
+  for (const pendingItem of pendingItems) {
+    pendingItem.status = 'canceled';
+    pendingItem.progress = 0;
+    pendingItem.error = 'Canceled by user';
+    if (activeRun) {
+      activeRun.canceled += 1;
+    }
+
+    appendLog({
+      level: 'info',
+      event: 'job.canceled',
+      jobId: pendingItem.id,
+      filePath: pendingItem.sourcePath,
+      message: `Canceled ${path.basename(pendingItem.sourcePath)} before processing started.`
+    });
   }
 
-  appendLog({ level: 'info', event: 'job.cancel_requested', jobId: activeJobId, message: `Cancel requested for job ${activeJobId}.` });
-  processor.cancel(activeJobId);
+  if (activeJobId) {
+    appendLog({ level: 'info', event: 'job.cancel_requested', jobId: activeJobId, message: `Cancel requested for job ${activeJobId}.` });
+    processor.cancel(activeJobId);
+  }
+
+  appendLog({
+    level: 'info',
+    event: 'queue.paused',
+    message: 'Queue stopped. Active job cancellation requested and pending jobs canceled.'
+  });
+  emitQueueState();
   return { ok: true as const };
 });
 
