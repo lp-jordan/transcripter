@@ -653,6 +653,33 @@ ipcMain.handle('queue:removeSelected', (_event, ids: string[]) => {
   return { ok: true as const };
 });
 
+ipcMain.handle('queue:resetSelected', (_event, ids: string[]) => {
+  if (activeJobId) {
+    return {
+      ok: false as const,
+      error: 'Pause or stop active transcription jobs before resetting files in the queue.'
+    };
+  }
+
+  for (const item of queue) {
+    if (!ids.includes(item.id)) {
+      continue;
+    }
+
+    item.status = 'pending';
+    item.progress = 0;
+    item.error = undefined;
+    item.outputFiles = undefined;
+    item.batchId = undefined;
+    item.batchStartedAt = undefined;
+    item.elapsedMs = 0;
+  }
+
+  appendLog({ level: 'info', event: 'queue.reset_selected', message: `Reset ${ids.length} selected queue item(s).` });
+  emitQueueState();
+  return { ok: true as const };
+});
+
 ipcMain.handle('queue:archiveCompleted', () => {
   const completedItems = queue.filter((item) => ['done', 'failed', 'canceled'].includes(item.status));
   const remainingItems = queue.filter((item) => !['done', 'failed', 'canceled'].includes(item.status));

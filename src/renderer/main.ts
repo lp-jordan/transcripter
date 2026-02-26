@@ -19,6 +19,7 @@ const vttOutputCheckbox = document.getElementById('format-vtt') as HTMLInputElem
 
 const addFilesButton = document.getElementById('add-files') as HTMLButtonElement;
 const removeSelectedButton = document.getElementById('remove-selected') as HTMLButtonElement;
+const resetSelectedButton = document.getElementById('reset-selected') as HTMLButtonElement;
 const archiveCompletedButton = document.getElementById('archive-completed') as HTMLButtonElement;
 const selectAllQueuedClipsCheckbox = document.getElementById('select-all-queued-clips') as HTMLInputElement;
 const selectAllLabel = document.getElementById('select-all-label') as HTMLSpanElement;
@@ -167,6 +168,7 @@ const updateButtons = () => {
   const allSelectableQueueItemsAreSelected = selectableQueueItems.length > 0 && selectedQueueItems.length === selectableQueueItems.length;
 
   removeSelectedButton.disabled = selectedQueueItems.length === 0 || queueState.hasRunningJob;
+  resetSelectedButton.disabled = selectedQueueItems.length === 0 || queueState.hasRunningJob;
   archiveCompletedButton.disabled = queueState.items.every((item) => !['done', 'failed', 'canceled'].includes(item.status));
   stopCurrentButton.disabled = !queueState.hasRunningJob;
   pauseToggleButton.disabled = !queueState.hasRunningJob;
@@ -546,6 +548,18 @@ addFilesButton.addEventListener('click', async () => {
 
 removeSelectedButton.addEventListener('click', async () => {
   const result = await window.transcripter.queue.removeSelected([...selectedIds]);
+  if (!result.ok) {
+    if (result.error) {
+      window.alert(result.error);
+    }
+    return;
+  }
+
+  selectedIds.clear();
+});
+
+resetSelectedButton.addEventListener('click', async () => {
+  const result = await window.transcripter.queue.resetSelected([...selectedIds]);
   if (!result.ok) {
     if (result.error) {
       window.alert(result.error);

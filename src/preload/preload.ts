@@ -20,6 +20,7 @@ const api = {
     add: (sourcePaths: string[]): Promise<{ ok: true }> => ipcRenderer.invoke('queue:add', sourcePaths),
     list: (): Promise<QueueState> => ipcRenderer.invoke('queue:list'),
     removeSelected: (ids: string[]): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('queue:removeSelected', ids),
+    resetSelected: (ids: string[]): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('queue:resetSelected', ids),
     archiveCompleted: (): Promise<{ ok: true }> => ipcRenderer.invoke('queue:archiveCompleted'),
     start: (): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('queue:start'),
     pause: (): Promise<{ ok: true }> => ipcRenderer.invoke('queue:pause'),
