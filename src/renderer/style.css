@@ -118,6 +118,16 @@ h1 {
   background: #243244;
 }
 
+.button-danger {
+  border-color: #7f1d1d;
+  background: #991b1b;
+  color: #fee2e2;
+}
+
+.button-danger:hover:not(:disabled) {
+  background: #b91c1c;
+}
+
 .button-icon {
   width: 2.35rem;
   height: 2.35rem;
@@ -503,6 +513,17 @@ button:disabled {
   padding: 0.7rem;
 }
 
+.archive-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.7rem;
+}
+
+.archive-header .section-title {
+  margin: 0;
+}
+
 .archive-empty-message {
   margin: 0;
   color: #94a3b8;
@@ -521,6 +542,9 @@ button:disabled {
   display: grid;
   gap: 0.65rem;
   margin-top: 0.45rem;
+  max-height: 24rem;
+  overflow-y: auto;
+  padding-right: 0.2rem;
 }
 
 .archive-day-group {

@@ -22,6 +22,7 @@ const api = {
     removeSelected: (ids: string[]): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('queue:removeSelected', ids),
     resetSelected: (ids: string[]): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('queue:resetSelected', ids),
     archiveCompleted: (): Promise<{ ok: true }> => ipcRenderer.invoke('queue:archiveCompleted'),
+    clearArchive: (): Promise<{ ok: true }> => ipcRenderer.invoke('queue:clearArchive'),
     start: (): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('queue:start'),
     pause: (): Promise<{ ok: true }> => ipcRenderer.invoke('queue:pause'),
     resume: (): Promise<{ ok: true }> => ipcRenderer.invoke('queue:resume'),
