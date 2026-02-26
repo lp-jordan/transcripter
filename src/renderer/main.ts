@@ -116,20 +116,6 @@ const requestWindowFitToContent = () => {
   }, 80);
 };
 
-let fitWindowTimer: ReturnType<typeof setTimeout> | null = null;
-
-const requestWindowFitToContent = () => {
-  if (fitWindowTimer) {
-    clearTimeout(fitWindowTimer);
-  }
-
-  fitWindowTimer = setTimeout(() => {
-    fitWindowTimer = null;
-    const contentHeight = document.documentElement.scrollHeight;
-    void window.transcripter.window.fitContent(contentHeight);
-  }, 80);
-};
-
 const formatStatusLabel = (status: string): string =>
   status
     .split('_')
