@@ -1,15 +1,27 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, screen } from 'electron';
 import path from 'node:path';
 import './ipc';
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
+const DEFAULT_WINDOW_SIZE = { width: 1200, height: 900 };
+const MIN_WINDOW_SIZE = { width: 980, height: 760 };
+
+const getInitialWindowBounds = () => {
+  const { workAreaSize } = screen.getPrimaryDisplay();
+
+  return {
+    width: Math.min(Math.max(DEFAULT_WINDOW_SIZE.width, MIN_WINDOW_SIZE.width), workAreaSize.width),
+    height: Math.min(Math.max(DEFAULT_WINDOW_SIZE.height, MIN_WINDOW_SIZE.height), workAreaSize.height)
+  };
+};
 
 const createMainWindow = async (): Promise<void> => {
+  const initialBounds = getInitialWindowBounds();
   const mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 780,
-    minWidth: 900,
-    minHeight: 600,
+    width: initialBounds.width,
+    height: initialBounds.height,
+    minWidth: MIN_WINDOW_SIZE.width,
+    minHeight: MIN_WINDOW_SIZE.height,
     show: false,
     webPreferences: {
       preload: path.join(__dirname, '../preload/preload.js'),
