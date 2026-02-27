@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { normalizeText } from '../output/formatting';
 import type {
   ProjectBundleBuildSummary,
   ProjectBundleInput,
@@ -216,36 +215,6 @@ const writeAtomicFile = async (targetPath: string, content: string): Promise<voi
   await fs.rename(tempPath, targetPath);
 };
 
-const transcriptTextFromVideo = (video: ProjectBundlePayload['videos'][number]): string => {
-  if (!isRecord(video.transcript)) {
-    return '';
-  }
-
-  const rawText = getStringValue(video.transcript.rawText);
-  return rawText ? normalizeText(rawText) : '';
-};
-
-const buildMergedText = (payload: ProjectBundlePayload): string =>
-  `${payload.videos
-    .map((video) => transcriptTextFromVideo(video))
-    .filter((text) => text.length > 0)
-    .join('\n\n')}\n`;
-
-const buildMergedMarkdown = (payload: ProjectBundlePayload): string => {
-  const lines: string[] = [`# ${payload.projectName}`, ''];
-
-  for (const video of payload.videos) {
-    const transcriptText = transcriptTextFromVideo(video);
-    if (transcriptText.length === 0) {
-      continue;
-    }
-
-    lines.push(`## ${video.fileName}`, '', transcriptText, '');
-  }
-
-  return `${lines.join('\n').trimEnd()}\n`;
-};
-
 export const validateProjectBundleInput = async (
   input: ProjectBundleInput
 ): Promise<ProjectBundleResponse<ProjectBundleValidationSummary> & { context?: BundleValidationContext }> => {
@@ -392,7 +361,6 @@ export const buildProjectBundle = async (
 
   const outputFolderPath = path.dirname(validation.context.outputPath);
   const jobsOutputPath = path.join(outputFolderPath, 'jobs');
-  const exportsOutputPath = path.join(outputFolderPath, 'exports');
 
   const includedJobs = validation.context.includedRecords;
   const payload: ProjectBundlePayload = {
@@ -436,12 +404,6 @@ export const buildProjectBundle = async (
       const outputName = duplicateIndex === 0 ? originalName : `${path.parse(originalName).name}.${duplicateIndex}.job.json`;
       const canonicalJobPath = path.join(jobsOutputPath, outputName);
       await fs.writeFile(canonicalJobPath, stablePrettyJson(record.parsed), 'utf8');
-    }
-
-    if (input.includeExports) {
-      await fs.mkdir(exportsOutputPath, { recursive: true });
-      await fs.writeFile(path.join(exportsOutputPath, 'merged.txt'), buildMergedText(payload), 'utf8');
-      await fs.writeFile(path.join(exportsOutputPath, 'merged.md'), buildMergedMarkdown(payload), 'utf8');
     }
 
     await writeAtomicFile(validation.context.outputPath, stablePrettyJson(payload));
