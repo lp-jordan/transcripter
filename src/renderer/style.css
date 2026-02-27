@@ -701,3 +701,61 @@ button:disabled {
   font-size: 0.72rem;
   padding: 0.3rem 0.45rem;
 }
+
+.modal-field {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.86rem;
+}
+
+.modal-field input {
+  width: 100%;
+}
+
+.modal-muted {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #9ca3af;
+}
+
+.bundle-modal-shell {
+  max-height: min(90vh, 52rem);
+  overflow-y: auto;
+}
+
+.bundle-input-section,
+.bundle-output-section,
+.bundle-validation-summary,
+.bundle-overwrite {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.65rem;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: #0b1220;
+}
+
+.bundle-actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.bundle-drop-zone {
+  min-height: 5.25rem;
+}
+
+.bundle-validation-summary p,
+.bundle-validation-summary ul,
+.bundle-overwrite p {
+  margin: 0;
+}
+
+.bundle-validation-summary ul {
+  padding-left: 1.15rem;
+  color: #cbd5e1;
+}
+
+.bundle-modal-actions {
+  gap: 0.5rem;
+}
