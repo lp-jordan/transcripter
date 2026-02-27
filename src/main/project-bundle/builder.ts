@@ -333,8 +333,8 @@ export const validateProjectBundleInput = async (
 
   let hasExistingProjectJson = false;
   try {
-    await fs.access(outputPath);
-    hasExistingProjectJson = true;
+    const outputStat = await fs.stat(outputPath);
+    hasExistingProjectJson = outputStat.isFile();
   } catch {
     hasExistingProjectJson = false;
   }

@@ -51,7 +51,6 @@ const bundleJobFileList = document.getElementById('bundle-job-file-list') as HTM
 const pickBundleOutputFolderButton = document.getElementById('pick-bundle-output-folder') as HTMLButtonElement;
 const bundleOutputFolderDisplay = document.getElementById('bundle-output-folder-display') as HTMLParagraphElement;
 const buildProjectBundleButton = document.getElementById('build-project-bundle') as HTMLButtonElement;
-const bundleOverwriteConfirmation = document.getElementById('bundle-overwrite-confirmation') as HTMLElement;
 const bundleIncludeExports = document.getElementById('bundle-include-exports') as HTMLInputElement;
 const toggleConsoleButton = document.getElementById('toggle-console') as HTMLButtonElement;
 const consolePanel = document.getElementById('console-panel') as HTMLElement;
@@ -253,12 +252,9 @@ const refreshBundleOverwriteState = async () => {
   const validation = await window.transcripter.projectBundle.validate(input);
 
   if (!validation.ok) {
-    bundleOverwriteConfirmation.hidden = true;
     updateBuildBundleButtonState();
     return;
   }
-
-  bundleOverwriteConfirmation.hidden = !validation.data.hasExistingProjectJson;
 
   updateBuildBundleButtonState();
 };
@@ -276,7 +272,6 @@ const resetBundleUi = async () => {
   bundleJobFilePaths = [];
   bundleOutputFolderPath = '';
   bundleIncludeExports.checked = false;
-  bundleOverwriteConfirmation.hidden = true;
   await renderBundleUi();
 };
 
