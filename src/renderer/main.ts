@@ -812,10 +812,6 @@ bundleProjectNameInput.addEventListener('input', () => {
   void refreshBundleOverwriteState();
 });
 
-bundleIncludeExports.addEventListener('change', () => {
-  void refreshBundleOverwriteState();
-});
-
 buildProjectBundleButton.addEventListener('click', async () => {
   updateBuildBundleButtonState();
   if (buildProjectBundleButton.disabled) {
