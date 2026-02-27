@@ -31,6 +31,14 @@ const stopCurrentButton = document.getElementById('stop-current') as HTMLButtonE
 const settingsTriggerButton = document.getElementById('settings-trigger') as HTMLButtonElement;
 const settingsMenu = document.getElementById('settings-menu') as HTMLElement;
 const settingsBackButton = document.getElementById('settings-back') as HTMLButtonElement;
+const toolsTriggerButton = document.getElementById('tools-trigger') as HTMLButtonElement;
+const toolsMenu = document.getElementById('tools-menu') as HTMLElement;
+const openMergeTranscriptsButton = document.getElementById('open-merge-transcripts') as HTMLButtonElement;
+const mergeTranscriptsModal = document.getElementById('merge-transcripts-modal') as HTMLDialogElement;
+const closeMergeTranscriptsButton = document.getElementById('close-merge-transcripts') as HTMLButtonElement;
+const mergeDropZone = document.getElementById('merge-drop-zone') as HTMLDivElement;
+const mergeFileList = document.getElementById('merge-file-list') as HTMLUListElement;
+const compileMergedTranscriptButton = document.getElementById('compile-merged-transcript') as HTMLButtonElement;
 const toggleConsoleButton = document.getElementById('toggle-console') as HTMLButtonElement;
 const consolePanel = document.getElementById('console-panel') as HTMLElement;
 const consoleOutput = document.getElementById('console-output') as HTMLPreElement;
@@ -49,6 +57,7 @@ let queueState: QueueState = {
 };
 
 let showConsole = false;
+let mergeTranscriptPaths: string[] = [];
 const appLogs: AppLogEntry[] = [];
 const MAX_CONSOLE_LINES = 200;
 let activeJobStartedAt = 0;
@@ -160,6 +169,29 @@ const fileUrlToPath = (value: string): string | null => {
   } catch {
     return null;
   }
+};
+
+const setToolsMenuOpen = (isOpen: boolean) => {
+  toolsMenu.hidden = !isOpen;
+  toolsTriggerButton.setAttribute('aria-expanded', String(isOpen));
+};
+
+const renderMergeTranscriptList = () => {
+  mergeFileList.innerHTML = '';
+
+  mergeTranscriptPaths.forEach((transcriptPath) => {
+    const item = document.createElement('li');
+    item.textContent = getFileName(transcriptPath);
+    mergeFileList.append(item);
+  });
+
+  compileMergedTranscriptButton.disabled = mergeTranscriptPaths.length === 0;
+};
+
+const appendMergeTranscriptPaths = (paths: string[]) => {
+  const txtPaths = paths.filter((candidatePath) => candidatePath.toLowerCase().endsWith('.txt'));
+  mergeTranscriptPaths = [...new Set([...mergeTranscriptPaths, ...txtPaths])];
+  renderMergeTranscriptList();
 };
 
 const updateButtons = () => {
@@ -641,6 +673,89 @@ document.addEventListener('click', (event) => {
   if (shouldCloseSettingsMenu) {
     setSettingsMenuOpen(false);
   }
+
+  const shouldCloseToolsMenu = !toolsMenu.hidden && !toolsMenu.contains(event.target) && !toolsTriggerButton.contains(event.target);
+  if (shouldCloseToolsMenu) {
+    setToolsMenuOpen(false);
+  }
+});
+
+toolsTriggerButton.addEventListener('click', () => {
+  setToolsMenuOpen(toolsMenu.hidden);
+});
+
+openMergeTranscriptsButton.addEventListener('click', () => {
+  setToolsMenuOpen(false);
+  mergeTranscriptsModal.showModal();
+});
+
+closeMergeTranscriptsButton.addEventListener('click', () => {
+  mergeTranscriptsModal.close();
+});
+
+mergeDropZone.addEventListener('dragover', (event) => {
+  event.preventDefault();
+  mergeDropZone.classList.add('dragging');
+});
+
+mergeDropZone.addEventListener('dragleave', () => {
+  mergeDropZone.classList.remove('dragging');
+});
+
+mergeDropZone.addEventListener('drop', (event: DragEvent) => {
+  event.preventDefault();
+  mergeDropZone.classList.remove('dragging');
+
+  const filePaths = [...(event.dataTransfer?.files ?? [])]
+    .flatMap((file) => {
+      const directPath = (file as File & { path?: string }).path;
+      if (typeof directPath === 'string' && directPath.length > 0) {
+        return [directPath];
+      }
+
+      const fallbackPath = window.transcripter.queue.getPathForFile(file);
+      return fallbackPath.length > 0 ? [fallbackPath] : [];
+    });
+
+  const uriList = event.dataTransfer?.getData('text/uri-list') ?? '';
+  const droppedUris = uriList
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith('#'))
+    .flatMap((line) => {
+      const path = fileUrlToPath(line);
+      return path ? [path] : [];
+    });
+
+  appendMergeTranscriptPaths([...new Set([...filePaths, ...droppedUris])]);
+});
+
+compileMergedTranscriptButton.addEventListener('click', async () => {
+  if (mergeTranscriptPaths.length === 0) {
+    return;
+  }
+
+  const mergedChunks = await Promise.all(
+    mergeTranscriptPaths.map(async (transcriptPath) => {
+      const content = await window.transcripter.file.readText(transcriptPath);
+      return content.trim();
+    })
+  );
+
+  const mergedContent = mergedChunks.filter((chunk) => chunk.length > 0).join('\n\n');
+  const savePath = await window.transcripter.settings.pickSaveFile('merged-transcript.txt');
+  if (!savePath) {
+    return;
+  }
+
+  await window.transcripter.file.writeText(savePath, mergedContent);
+  window.alert('Merged transcript saved.');
+  mergeTranscriptsModal.close();
+});
+
+mergeTranscriptsModal.addEventListener('close', () => {
+  mergeTranscriptPaths = [];
+  renderMergeTranscriptList();
 });
 
 toggleConsoleButton.addEventListener('click', () => {
@@ -707,6 +822,7 @@ const bootstrap = async () => {
   });
 
   renderConsole();
+  renderMergeTranscriptList();
   await refreshQueueState();
   syncActiveJobTimer();
   window.addEventListener('resize', requestWindowFitToContent);

@@ -580,6 +580,19 @@ ipcMain.handle('settings:pickOutputDirectory', async (_event, defaultPath?: stri
   return result.filePaths[0] ?? null;
 });
 
+ipcMain.handle('settings:pickSaveFile', async (_event, defaultPath?: string) => {
+  const result = await dialog.showSaveDialog({
+    defaultPath,
+    filters: [{ name: 'Text Files', extensions: ['txt'] }]
+  });
+
+  if (result.canceled) {
+    return null;
+  }
+
+  return result.filePath ?? null;
+});
+
 ipcMain.handle('app-log:list', () => [...appLogs]);
 
 ipcMain.handle('window:fit-content', (event, requestedContentHeight: number) => {
