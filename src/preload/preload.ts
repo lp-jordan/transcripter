@@ -65,6 +65,8 @@ const api = {
   projectBundle: {
     pickJobsFolder: (defaultPath?: string): Promise<string | null> => ipcRenderer.invoke('projectBundle:pickJobsFolder', defaultPath),
     pickJobJsonFiles: (): Promise<string[]> => ipcRenderer.invoke('projectBundle:pickJobJsonFiles'),
+    listJobJsonFilesInFolder: (folderPath?: string): Promise<string[]> =>
+      ipcRenderer.invoke('projectBundle:listJobJsonFilesInFolder', folderPath),
     pickOutputFolder: (defaultPath?: string): Promise<string | null> =>
       ipcRenderer.invoke('projectBundle:pickOutputFolder', defaultPath),
     validate: (input: ProjectBundleInput): Promise<ProjectBundleResponse<ProjectBundleValidationSummary>> =>
