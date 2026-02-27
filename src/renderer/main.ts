@@ -51,7 +51,6 @@ const bundleJobFileList = document.getElementById('bundle-job-file-list') as HTM
 const pickBundleOutputFolderButton = document.getElementById('pick-bundle-output-folder') as HTMLButtonElement;
 const bundleOutputFolderDisplay = document.getElementById('bundle-output-folder-display') as HTMLParagraphElement;
 const buildProjectBundleButton = document.getElementById('build-project-bundle') as HTMLButtonElement;
-const bundleIncludeExports = document.getElementById('bundle-include-exports') as HTMLInputElement;
 const toggleConsoleButton = document.getElementById('toggle-console') as HTMLButtonElement;
 const consolePanel = document.getElementById('console-panel') as HTMLElement;
 const consoleOutput = document.getElementById('console-output') as HTMLPreElement;
@@ -236,8 +235,7 @@ const getProjectBundleInput = (): ProjectBundleInput => ({
   jobsFolderPath: bundleJobFolderPath,
   jobFilePaths: [...bundleJobFilePaths],
   outputFolderPath: bundleOutputFolderPath,
-  overwriteConfirmed: true,
-  includeExports: bundleIncludeExports.checked
+  overwriteConfirmed: true
 });
 
 const updateBuildBundleButtonState = () => {
@@ -271,7 +269,6 @@ const resetBundleUi = async () => {
   bundleJobFolderPath = '';
   bundleJobFilePaths = [];
   bundleOutputFolderPath = '';
-  bundleIncludeExports.checked = false;
   await renderBundleUi();
 };
 

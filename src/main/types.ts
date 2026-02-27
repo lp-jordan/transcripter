@@ -111,7 +111,6 @@ export type ProjectBundleInput = {
   jobFilePaths?: string[];
   outputFolderPath: string;
   overwriteConfirmed?: boolean;
-  includeExports?: boolean;
 };
 
 export type ProjectBundleValidationSummary = {
