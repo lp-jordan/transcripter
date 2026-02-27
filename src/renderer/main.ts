@@ -34,11 +34,27 @@ const settingsBackButton = document.getElementById('settings-back') as HTMLButto
 const toolsTriggerButton = document.getElementById('tools-trigger') as HTMLButtonElement;
 const toolsMenu = document.getElementById('tools-menu') as HTMLElement;
 const openMergeTranscriptsButton = document.getElementById('open-merge-transcripts') as HTMLButtonElement;
+const openBuildProjectBundleButton = document.getElementById('open-build-project-bundle') as HTMLButtonElement;
 const mergeTranscriptsModal = document.getElementById('merge-transcripts-modal') as HTMLDialogElement;
 const closeMergeTranscriptsButton = document.getElementById('close-merge-transcripts') as HTMLButtonElement;
 const mergeDropZone = document.getElementById('merge-drop-zone') as HTMLDivElement;
 const mergeFileList = document.getElementById('merge-file-list') as HTMLUListElement;
 const compileMergedTranscriptButton = document.getElementById('compile-merged-transcript') as HTMLButtonElement;
+const buildProjectBundleModal = document.getElementById('build-project-bundle-modal') as HTMLDialogElement;
+const closeBuildProjectBundleButton = document.getElementById('close-build-project-bundle') as HTMLButtonElement;
+const bundleProjectNameInput = document.getElementById('bundle-project-name') as HTMLInputElement;
+const pickBundleJobsFolderButton = document.getElementById('pick-bundle-jobs-folder') as HTMLButtonElement;
+const pickBundleJobFilesButton = document.getElementById('pick-bundle-job-files') as HTMLButtonElement;
+const bundleJobsFolderDisplay = document.getElementById('bundle-jobs-folder-display') as HTMLParagraphElement;
+const bundleJobDropZone = document.getElementById('bundle-job-drop-zone') as HTMLDivElement;
+const bundleJobFileList = document.getElementById('bundle-job-file-list') as HTMLUListElement;
+const pickBundleOutputFolderButton = document.getElementById('pick-bundle-output-folder') as HTMLButtonElement;
+const bundleOutputFolderDisplay = document.getElementById('bundle-output-folder-display') as HTMLParagraphElement;
+const validateProjectBundleButton = document.getElementById('validate-project-bundle') as HTMLButtonElement;
+const buildProjectBundleButton = document.getElementById('build-project-bundle') as HTMLButtonElement;
+const bundleValidationSummary = document.getElementById('bundle-validation-summary') as HTMLElement;
+const bundleOverwriteConfirmation = document.getElementById('bundle-overwrite-confirmation') as HTMLElement;
+const bundleOverwriteApproval = document.getElementById('bundle-overwrite-approval') as HTMLInputElement;
 const toggleConsoleButton = document.getElementById('toggle-console') as HTMLButtonElement;
 const consolePanel = document.getElementById('console-panel') as HTMLElement;
 const consoleOutput = document.getElementById('console-output') as HTMLPreElement;
@@ -58,6 +74,9 @@ let queueState: QueueState = {
 
 let showConsole = false;
 let mergeTranscriptPaths: string[] = [];
+let bundleJobFolderPath = '';
+let bundleJobFilePaths: string[] = [];
+let bundleOutputFolderPath = '';
 const appLogs: AppLogEntry[] = [];
 const MAX_CONSOLE_LINES = 200;
 let activeJobStartedAt = 0;
@@ -192,6 +211,114 @@ const appendMergeTranscriptPaths = (paths: string[]) => {
   const txtPaths = paths.filter((candidatePath) => candidatePath.toLowerCase().endsWith('.txt'));
   mergeTranscriptPaths = [...new Set([...mergeTranscriptPaths, ...txtPaths])];
   renderMergeTranscriptList();
+};
+
+const appendBundleJobPaths = (paths: string[]) => {
+  const filtered = paths.filter((candidatePath) => candidatePath.toLowerCase().endsWith('.job.json'));
+  bundleJobFilePaths = [...new Set([...bundleJobFilePaths, ...filtered])];
+};
+
+const renderBundleFileList = () => {
+  bundleJobFileList.innerHTML = '';
+
+  bundleJobFilePaths.forEach((jobPath) => {
+    const item = document.createElement('li');
+    item.textContent = getFileName(jobPath);
+    item.title = jobPath;
+    bundleJobFileList.append(item);
+  });
+};
+
+const detectDuplicateFileNames = (paths: string[]) => {
+  const names = new Map<string, number>();
+  paths.forEach((jobPath) => {
+    const name = getFileName(jobPath).toLowerCase();
+    names.set(name, (names.get(name) ?? 0) + 1);
+  });
+
+  return [...names.entries()].filter(([, count]) => count > 1).map(([name]) => name);
+};
+
+const computeBundleValidation = async () => {
+  const included = [...bundleJobFilePaths];
+  const excluded: string[] = [];
+  const emptyTranscript: string[] = [];
+
+  await Promise.all(
+    included.map(async (jobPath) => {
+      try {
+        const raw = await window.transcripter.file.readText(jobPath);
+        const parsed = JSON.parse(raw) as { transcript?: string };
+        if (typeof parsed.transcript !== 'string' || parsed.transcript.trim().length === 0) {
+          emptyTranscript.push(jobPath);
+        }
+      } catch {
+        excluded.push(jobPath);
+      }
+    })
+  );
+
+  const duplicateNames = detectDuplicateFileNames(included);
+  let hasExistingProjectJson = false;
+
+  if (bundleOutputFolderPath.length > 0) {
+    const projectPath = `${bundleOutputFolderPath.replace(/[\\/]$/, '')}/project.json`;
+    try {
+      await window.transcripter.file.readText(projectPath);
+      hasExistingProjectJson = true;
+    } catch {
+      hasExistingProjectJson = false;
+    }
+  }
+
+  return {
+    includedCount: included.length,
+    excludedCount: excluded.length,
+    emptyTranscriptCount: emptyTranscript.length,
+    duplicateNames,
+    hasExistingProjectJson
+  };
+};
+
+const renderBundleValidationSummary = async () => {
+  const validation = await computeBundleValidation();
+  const messages = [
+    `Included: ${validation.includedCount}`,
+    `Excluded: ${validation.excludedCount}`,
+    `Empty transcript warnings: ${validation.emptyTranscriptCount}`,
+    `Duplicate filename warnings: ${validation.duplicateNames.length}`
+  ];
+
+  bundleValidationSummary.innerHTML = `<ul>${messages.map((message) => `<li>${message}</li>`).join('')}</ul>`;
+  bundleOverwriteConfirmation.hidden = !validation.hasExistingProjectJson;
+
+  if (!validation.hasExistingProjectJson) {
+    bundleOverwriteApproval.checked = false;
+  }
+
+  buildProjectBundleButton.disabled =
+    bundleProjectNameInput.value.trim().length === 0 ||
+    bundleOutputFolderPath.length === 0 ||
+    bundleJobFilePaths.length === 0 ||
+    (validation.hasExistingProjectJson && !bundleOverwriteApproval.checked);
+};
+
+const renderBundleUi = async () => {
+  bundleJobsFolderDisplay.textContent = bundleJobFolderPath.length > 0 ? bundleJobFolderPath : 'No jobs folder selected.';
+  bundleOutputFolderDisplay.textContent = bundleOutputFolderPath.length > 0 ? bundleOutputFolderPath : 'No output folder selected.';
+  renderBundleFileList();
+  await renderBundleValidationSummary();
+};
+
+const resetBundleUi = async () => {
+  bundleProjectNameInput.value = '';
+  bundleJobFolderPath = '';
+  bundleJobFilePaths = [];
+  bundleOutputFolderPath = '';
+  bundleOverwriteApproval.checked = false;
+  bundleOverwriteConfirmation.hidden = true;
+  bundleValidationSummary.innerHTML = '<p>Run validation to review included/excluded files and warnings.</p>';
+  await renderBundleUi();
 };
 
 const updateButtons = () => {
@@ -689,8 +816,68 @@ openMergeTranscriptsButton.addEventListener('click', () => {
   mergeTranscriptsModal.showModal();
 });
 
+openBuildProjectBundleButton.addEventListener('click', () => {
+  setToolsMenuOpen(false);
+  void resetBundleUi();
+  buildProjectBundleModal.showModal();
+});
+
 closeMergeTranscriptsButton.addEventListener('click', () => {
   mergeTranscriptsModal.close();
+});
+
+closeBuildProjectBundleButton.addEventListener('click', () => {
+  buildProjectBundleModal.close();
+});
+
+pickBundleJobsFolderButton.addEventListener('click', async () => {
+  const selectedPath = await window.transcripter.settings.pickOutputDirectory(bundleJobFolderPath);
+  if (!selectedPath) {
+    return;
+  }
+
+  bundleJobFolderPath = selectedPath;
+  await renderBundleUi();
+});
+
+pickBundleJobFilesButton.addEventListener('click', async () => {
+  const selectedPaths = await window.transcripter.queue.pickFiles();
+  appendBundleJobPaths(selectedPaths);
+  await renderBundleUi();
+});
+
+pickBundleOutputFolderButton.addEventListener('click', async () => {
+  const selectedPath = await window.transcripter.settings.pickOutputDirectory(bundleOutputFolderPath);
+  if (!selectedPath) {
+    return;
+  }
+
+  bundleOutputFolderPath = selectedPath;
+  await renderBundleUi();
+});
+
+validateProjectBundleButton.addEventListener('click', () => {
+  void renderBundleValidationSummary();
+});
+
+bundleOverwriteApproval.addEventListener('change', () => {
+  void renderBundleValidationSummary();
+});
+
+bundleProjectNameInput.addEventListener('input', () => {
+  void renderBundleValidationSummary();
+});
+
+buildProjectBundleButton.addEventListener('click', async () => {
+  await renderBundleValidationSummary();
+  if (buildProjectBundleButton.disabled) {
+    return;
+  }
+
+  window.alert(
+    `Project bundle build requested for ${bundleProjectNameInput.value.trim()} with ${bundleJobFilePaths.length} job file(s).`
+  );
+  buildProjectBundleModal.close();
 });
 
 mergeDropZone.addEventListener('dragover', (event) => {
@@ -756,6 +943,48 @@ compileMergedTranscriptButton.addEventListener('click', async () => {
 mergeTranscriptsModal.addEventListener('close', () => {
   mergeTranscriptPaths = [];
   renderMergeTranscriptList();
+});
+
+buildProjectBundleModal.addEventListener('close', () => {
+  void resetBundleUi();
+});
+
+bundleJobDropZone.addEventListener('dragover', (event) => {
+  event.preventDefault();
+  bundleJobDropZone.classList.add('dragging');
+});
+
+bundleJobDropZone.addEventListener('dragleave', () => {
+  bundleJobDropZone.classList.remove('dragging');
+});
+
+bundleJobDropZone.addEventListener('drop', (event: DragEvent) => {
+  event.preventDefault();
+  bundleJobDropZone.classList.remove('dragging');
+
+  const filePaths = [...(event.dataTransfer?.files ?? [])]
+    .flatMap((file) => {
+      const directPath = (file as File & { path?: string }).path;
+      if (typeof directPath === 'string' && directPath.length > 0) {
+        return [directPath];
+      }
+
+      const fallbackPath = window.transcripter.queue.getPathForFile(file);
+      return fallbackPath.length > 0 ? [fallbackPath] : [];
+    });
+
+  const uriList = event.dataTransfer?.getData('text/uri-list') ?? '';
+  const droppedUris = uriList
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith('#'))
+    .flatMap((line) => {
+      const path = fileUrlToPath(line);
+      return path ? [path] : [];
+    });
+
+  appendBundleJobPaths([...new Set([...filePaths, ...droppedUris])]);
+  void renderBundleUi();
 });
 
 toggleConsoleButton.addEventListener('click', () => {
