@@ -52,7 +52,6 @@ const pickBundleOutputFolderButton = document.getElementById('pick-bundle-output
 const bundleOutputFolderDisplay = document.getElementById('bundle-output-folder-display') as HTMLParagraphElement;
 const buildProjectBundleButton = document.getElementById('build-project-bundle') as HTMLButtonElement;
 const bundleOverwriteConfirmation = document.getElementById('bundle-overwrite-confirmation') as HTMLElement;
-const bundleOverwriteApproval = document.getElementById('bundle-overwrite-approval') as HTMLInputElement;
 const bundleIncludeExports = document.getElementById('bundle-include-exports') as HTMLInputElement;
 const toggleConsoleButton = document.getElementById('toggle-console') as HTMLButtonElement;
 const consolePanel = document.getElementById('console-panel') as HTMLElement;
@@ -76,7 +75,6 @@ let mergeTranscriptPaths: string[] = [];
 let bundleJobFolderPath = '';
 let bundleJobFilePaths: string[] = [];
 let bundleOutputFolderPath = '';
-let bundleRequiresOverwriteConfirmation = false;
 const appLogs: AppLogEntry[] = [];
 const MAX_CONSOLE_LINES = 200;
 let activeJobStartedAt = 0;
@@ -234,7 +232,7 @@ const getProjectBundleInput = (): ProjectBundleInput => ({
   jobsFolderPath: bundleJobFolderPath,
   jobFilePaths: [...bundleJobFilePaths],
   outputFolderPath: bundleOutputFolderPath,
-  overwriteConfirmed: bundleOverwriteApproval.checked,
+  overwriteConfirmed: true,
   includeExports: bundleIncludeExports.checked
 });
 
@@ -242,8 +240,7 @@ const updateBuildBundleButtonState = () => {
   buildProjectBundleButton.disabled =
     bundleProjectNameInput.value.trim().length === 0 ||
     bundleOutputFolderPath.length === 0 ||
-    bundleJobFilePaths.length === 0 ||
-    (bundleRequiresOverwriteConfirmation && !bundleOverwriteApproval.checked);
+    bundleJobFilePaths.length === 0;
 };
 
 const refreshBundleOverwriteState = async () => {
@@ -251,19 +248,12 @@ const refreshBundleOverwriteState = async () => {
   const validation = await window.transcripter.projectBundle.validate(input);
 
   if (!validation.ok) {
-    bundleRequiresOverwriteConfirmation = false;
     bundleOverwriteConfirmation.hidden = true;
-    bundleOverwriteApproval.checked = false;
     updateBuildBundleButtonState();
     return;
   }
 
-  bundleRequiresOverwriteConfirmation = validation.data.hasExistingProjectJson;
   bundleOverwriteConfirmation.hidden = !validation.data.hasExistingProjectJson;
-
-  if (!validation.data.hasExistingProjectJson) {
-    bundleOverwriteApproval.checked = false;
-  }
 
   updateBuildBundleButtonState();
 };
@@ -280,9 +270,7 @@ const resetBundleUi = async () => {
   bundleJobFolderPath = '';
   bundleJobFilePaths = [];
   bundleOutputFolderPath = '';
-  bundleOverwriteApproval.checked = false;
   bundleIncludeExports.checked = false;
-  bundleRequiresOverwriteConfirmation = false;
   bundleOverwriteConfirmation.hidden = true;
   await renderBundleUi();
 };
@@ -820,10 +808,6 @@ pickBundleOutputFolderButton.addEventListener('click', async () => {
 
   bundleOutputFolderPath = selectedPath;
   await renderBundleUi();
-});
-
-bundleOverwriteApproval.addEventListener('change', () => {
-  updateBuildBundleButtonState();
 });
 
 bundleProjectNameInput.addEventListener('input', () => {
