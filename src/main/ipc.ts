@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { buildProjectBundle, validateProjectBundleInput } from './project-bundle/builder';
 import { resolveFfmpegPathWithMeta } from './ffmpeg-path';
 import { writeJobJsonOutput, writeSelectedOutputs } from './output/writers';
 import { ProcessorClient } from './processor-client';
@@ -327,113 +328,6 @@ const persistSettings = async (next: Partial<AppSettings>) => {
   return merged;
 };
 
-
-type BundleJobRecord = {
-  sourcePath: string;
-  fileName: string;
-  parsed: Record<string, unknown>;
-  isEmptyTranscript: boolean;
-};
-
-const listJobJsonFilesFromFolder = async (folderPath: string): Promise<string[]> => {
-  const entries = await fs.readdir(folderPath, { withFileTypes: true });
-  return entries
-    .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.job.json'))
-    .map((entry) => path.join(folderPath, entry.name));
-};
-
-const collectProjectBundleFilePaths = async (input: ProjectBundleInput): Promise<string[]> => {
-  const discoveredPaths = input.jobsFolderPath ? await listJobJsonFilesFromFolder(path.resolve(input.jobsFolderPath)) : [];
-  const explicitPaths = Array.isArray(input.jobFilePaths) ? input.jobFilePaths : [];
-  const all = [...discoveredPaths, ...explicitPaths]
-    .map((candidatePath) => path.resolve(candidatePath))
-    .filter((candidatePath) => candidatePath.toLowerCase().endsWith('.job.json'));
-  return [...new Set(all)];
-};
-
-const computeProjectBundleValidation = async (
-  input: ProjectBundleInput
-): Promise<ProjectBundleResponse<ProjectBundleValidationSummary> & { records?: BundleJobRecord[] }> => {
-  if (typeof input.outputFolderPath !== 'string' || input.outputFolderPath.trim().length === 0) {
-    return { ok: false, code: 'OUTPUT_FOLDER_REQUIRED', error: 'An output folder is required.' };
-  }
-
-  const allJobPaths = await collectProjectBundleFilePaths(input);
-  if (allJobPaths.length === 0) {
-    return { ok: false, code: 'NO_JOB_FILES', error: 'No .job.json files were provided or discovered.' };
-  }
-
-  const includedJobPaths: string[] = [];
-  const excludedJobPaths: string[] = [];
-  const records: BundleJobRecord[] = [];
-
-  for (const jobPath of allJobPaths) {
-    try {
-      const raw = await fs.readFile(jobPath, 'utf8');
-      const parsed = JSON.parse(raw) as Record<string, unknown> & { transcript?: { rawText?: string } | string };
-      const transcriptText =
-        typeof parsed.transcript === 'string'
-          ? parsed.transcript
-          : typeof parsed.transcript?.rawText === 'string'
-            ? parsed.transcript.rawText
-            : '';
-      const record: BundleJobRecord = {
-        sourcePath: jobPath,
-        fileName: path.basename(jobPath),
-        parsed,
-        isEmptyTranscript: transcriptText.trim().length === 0
-      };
-      records.push(record);
-      includedJobPaths.push(jobPath);
-    } catch {
-      excludedJobPaths.push(jobPath);
-    }
-  }
-
-  const duplicateCounter = new Map<string, number>();
-  for (const record of records) {
-    const normalized = record.fileName.toLowerCase();
-    duplicateCounter.set(normalized, (duplicateCounter.get(normalized) ?? 0) + 1);
-  }
-
-  const duplicateFilenameCount = [...duplicateCounter.values()].filter((count) => count > 1).length;
-  const emptyTranscriptCount = records.filter((record) => record.isEmptyTranscript).length;
-
-  const outputFolderPath = path.resolve(input.outputFolderPath);
-  const outputPath = path.join(outputFolderPath, 'project.json');
-  let hasExistingProjectJson = false;
-  try {
-    await fs.access(outputPath);
-    hasExistingProjectJson = true;
-  } catch {
-    hasExistingProjectJson = false;
-  }
-
-  const warnings: string[] = [];
-  if (emptyTranscriptCount > 0) {
-    warnings.push(`${emptyTranscriptCount} job file(s) have empty transcript content.`);
-  }
-  if (duplicateFilenameCount > 0) {
-    warnings.push(`${duplicateFilenameCount} duplicate filename(s) were detected.`);
-  }
-  if (excludedJobPaths.length > 0) {
-    warnings.push(`${excludedJobPaths.length} job file(s) could not be parsed and were excluded.`);
-  }
-
-  const data: ProjectBundleValidationSummary = {
-    includedCount: includedJobPaths.length,
-    excludedCount: excludedJobPaths.length,
-    emptyTranscriptCount,
-    duplicateFilenameCount,
-    hasExistingProjectJson,
-    requiresOverwriteConfirmation: hasExistingProjectJson,
-    warnings,
-    includedJobPaths,
-    excludedJobPaths
-  };
-
-  return { ok: true, data, records };
-};
 
 const writeRunLogFile = async (summary: RunSummary): Promise<void> => {
   if (!summary.writeRunLog) {
@@ -1078,7 +972,7 @@ ipcMain.handle('projectBundle:validate', async (_event, input: ProjectBundleInpu
     return { ok: false, code: 'INVALID_INPUT', error: 'Invalid project bundle input.' };
   }
 
-  const validation = await computeProjectBundleValidation(input);
+  const validation = await validateProjectBundleInput(input);
   if (!validation.ok) {
     return validation;
   }
@@ -1091,63 +985,7 @@ ipcMain.handle('projectBundle:build', async (_event, input: ProjectBundleInput):
     return { ok: false, code: 'INVALID_INPUT', error: 'Invalid project bundle input.' };
   }
 
-  if (typeof input.projectName !== 'string' || input.projectName.trim().length === 0) {
-    return { ok: false, code: 'INVALID_INPUT', error: 'Project name is required.' };
-  }
-
-  const validation = await computeProjectBundleValidation(input);
-  if (!validation.ok) {
-    return validation;
-  }
-
-  const summary = validation.data;
-  if (summary.hasExistingProjectJson && !input.overwriteApproved) {
-    return {
-      ok: false,
-      code: 'OVERWRITE_CONFIRMATION_REQUIRED',
-      error: 'Explicit overwrite confirmation is required before writing project.json.',
-      data: summary
-    };
-  }
-
-  const outputFolderPath = path.resolve(input.outputFolderPath);
-  const outputPath = path.join(outputFolderPath, 'project.json');
-
-  try {
-    await fs.mkdir(outputFolderPath, { recursive: true });
-    const payload = {
-      schemaVersion: '1.0',
-      projectName: input.projectName.trim(),
-      createdAt: new Date().toISOString(),
-      jobCount: validation.records?.length ?? 0,
-      jobs: (validation.records ?? []).map((record) => ({
-        sourcePath: record.sourcePath,
-        fileName: record.fileName,
-        job: record.parsed
-      }))
-    };
-
-    await fs.writeFile(outputPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
-
-    return {
-      ok: true,
-      data: {
-        outputPath,
-        includedCount: summary.includedCount,
-        excludedCount: summary.excludedCount,
-        emptyTranscriptCount: summary.emptyTranscriptCount,
-        duplicateFilenameCount: summary.duplicateFilenameCount,
-        overwritten: summary.hasExistingProjectJson
-      }
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      code: 'WRITE_FAILED',
-      error: error instanceof Error ? error.message : String(error),
-      data: summary
-    };
-  }
+  return buildProjectBundle(input, app.getVersion());
 });
 
 ipcMain.handle('app-log:list', () => [...appLogs]);
