@@ -1,5 +1,14 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
-import type { AppLogEntry, AppSettings, ArchiveBatch, QueueItem } from '../main/types';
+import type {
+  AppLogEntry,
+  AppSettings,
+  ArchiveBatch,
+  ProjectBundleBuildSummary,
+  ProjectBundleInput,
+  ProjectBundleResponse,
+  ProjectBundleValidationSummary,
+  QueueItem
+} from '../main/types';
 
 export type QueueState = {
   items: QueueItem[];
@@ -52,6 +61,16 @@ const api = {
         ipcRenderer.removeListener('app-log:entry', wrapped);
       };
     }
+  },
+  projectBundle: {
+    pickJobsFolder: (defaultPath?: string): Promise<string | null> => ipcRenderer.invoke('projectBundle:pickJobsFolder', defaultPath),
+    pickJobJsonFiles: (): Promise<string[]> => ipcRenderer.invoke('projectBundle:pickJobJsonFiles'),
+    pickOutputFolder: (defaultPath?: string): Promise<string | null> =>
+      ipcRenderer.invoke('projectBundle:pickOutputFolder', defaultPath),
+    validate: (input: ProjectBundleInput): Promise<ProjectBundleResponse<ProjectBundleValidationSummary>> =>
+      ipcRenderer.invoke('projectBundle:validate', input),
+    build: (input: ProjectBundleInput): Promise<ProjectBundleResponse<ProjectBundleBuildSummary>> =>
+      ipcRenderer.invoke('projectBundle:build', input)
   },
   window: {
     fitContent: (contentHeight: number): Promise<{ ok: boolean }> => ipcRenderer.invoke('window:fit-content', contentHeight)
