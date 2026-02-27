@@ -1,9 +1,10 @@
 import { BrowserWindow, app, dialog, ipcMain, screen, shell } from 'electron';
 import { randomUUID } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { resolveFfmpegPathWithMeta } from './ffmpeg-path';
-import { writeSelectedOutputs } from './output/writers';
+import { writeJobJsonOutput, writeSelectedOutputs } from './output/writers';
 import { ProcessorClient } from './processor-client';
 import type { AppLogEntry, AppSettings, ArchiveBatch, OutputOptions, ProcessingJob, QueueItem, WhisperModel } from './types';
 import { resolveWhisperModelDirectoryWithMeta, resolveWhisperPathWithMeta } from './whisper-path';
@@ -51,6 +52,59 @@ type RunSummary = {
 };
 
 let activeRun: RunSummary | null = null;
+
+const getErrorCode = (errorMessage: string): string => {
+  const normalized = errorMessage.toLowerCase();
+  if (normalized.includes('whisper executable not found')) return 'RUNTIME_MISSING';
+  if (normalized.includes('model file') && normalized.includes('not found')) return 'MODEL_MISSING';
+  if (normalized.includes('job canceled')) return 'JOB_CANCELED';
+  if (normalized.includes('command failed')) return 'PROCESS_EXECUTION_FAILED';
+  return 'UNKNOWN';
+};
+
+const resolveFfprobePath = async (): Promise<string> => {
+  if (ffmpegRuntime.resolvedPath && path.isAbsolute(ffmpegRuntime.resolvedPath)) {
+    const ffprobeCandidate = path.join(path.dirname(ffmpegRuntime.resolvedPath), process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe');
+    try {
+      await fs.access(ffprobeCandidate);
+      return ffprobeCandidate;
+    } catch {
+      // fall through
+    }
+  }
+
+  return 'ffprobe';
+};
+
+const probeDurationSeconds = async (inputPath: string): Promise<number | null> => {
+  const ffprobePath = await resolveFfprobePath();
+  return new Promise((resolve) => {
+    const child = spawn(
+      ffprobePath,
+      ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=nokey=1:noprint_wrappers=1', inputPath],
+      { stdio: ['ignore', 'pipe', 'ignore'] }
+    );
+    let stdout = '';
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.on('error', () => resolve(null));
+    child.on('close', (code) => {
+      if (code !== 0) {
+        resolve(null);
+        return;
+      }
+
+      const parsed = Number.parseFloat(stdout.trim());
+      resolve(Number.isFinite(parsed) && parsed > 0 ? parsed : null);
+    });
+  });
+};
+
+const toRelativeOutputPath = (outputDirectory: string, absolutePath: string | null): string | null => {
+  if (!absolutePath) return null;
+  return path.relative(outputDirectory, absolutePath).split(path.sep).join('/');
+};
 
 const isWhisperModel = (value: unknown): value is WhisperModel => ['tiny', 'base', 'small'].includes(String(value));
 
@@ -287,7 +341,7 @@ const finalizeRunIfComplete = async () => {
 };
 
 
-const failPendingJobsForFatalError = (fatalError: string) => {
+const failPendingJobsForFatalError = async (fatalError: string) => {
   for (const item of queue) {
     if (item.status !== 'pending') {
       continue;
@@ -299,6 +353,57 @@ const failPendingJobsForFatalError = (fatalError: string) => {
     if (activeRun) {
       activeRun.failed += 1;
     }
+    try {
+      const outDir = item.outputDirectory;
+      const baseName = path.parse(item.sourcePath).name;
+      const durationSeconds = await probeDurationSeconds(item.sourcePath);
+      const jobFilePath = await writeJobJsonOutput({
+        outputDirectory: outDir,
+        baseName,
+        source: {
+          fileName: path.basename(item.sourcePath),
+          originalPath: item.sourcePath,
+          durationSeconds
+        },
+        settings: {
+          model: item.model,
+          language: item.language,
+          timestamps: true,
+          outputOptions: item.outputOptions
+        },
+        outputs: {
+          txtPath: toRelativeOutputPath(outDir, item.outputOptions.txt ? path.join(outDir, 'transcripts', `${baseName}.txt`) : null),
+          srtPath: toRelativeOutputPath(outDir, item.outputOptions.srt ? path.join(outDir, 'subtitles', `${baseName}.srt`) : null),
+          vttPath: toRelativeOutputPath(outDir, item.outputOptions.vtt ? path.join(outDir, 'subtitles', `${baseName}.vtt`) : null),
+          timecodedTxtPath: toRelativeOutputPath(
+            outDir,
+            item.outputOptions.timecodedTxt ? path.join(outDir, 'transcripts', `${baseName}_timecoded.txt`) : null
+          )
+        },
+        transcript: {
+          rawText: '',
+          segments: []
+        },
+        status: 'failed',
+        transcripterVersion: app.getVersion(),
+        createdAt: new Date().toISOString(),
+        jobId: item.id,
+        error: {
+          message: fatalError,
+          code: 'RUNTIME_MISSING'
+        }
+      });
+      item.outputFiles = [jobFilePath];
+    } catch (jobError) {
+      appendLog({
+        level: 'error',
+        event: 'job.json_write_failed',
+        jobId: item.id,
+        filePath: item.sourcePath,
+        message: `Failed writing job JSON for ${path.basename(item.sourcePath)}: ${jobError instanceof Error ? jobError.message : String(jobError)}`
+      });
+    }
+
     appendLog({
       level: 'error',
       event: 'job.failed_fatal_init',
@@ -414,7 +519,7 @@ const processNextPending = async () => {
       activeRun.fatalError = runtimeError;
     }
 
-    failPendingJobsForFatalError(runtimeError);
+    await failPendingJobsForFatalError(runtimeError);
 
     if (!runtimeValidationErrorShown) {
       appendLog({
@@ -471,7 +576,43 @@ processor.on('complete', async (payload) => {
       overwritePolicy: settings.overwritePolicy ?? 'overwrite'
     });
 
-    item.outputFiles = outputFiles;
+    const durationSeconds = await probeDurationSeconds(item.sourcePath);
+    const txtPath = item.outputOptions.txt ? path.join(outDir, 'transcripts', `${baseName}.txt`) : null;
+    const srtPath = item.outputOptions.srt ? path.join(outDir, 'subtitles', `${baseName}.srt`) : null;
+    const vttPath = item.outputOptions.vtt ? path.join(outDir, 'subtitles', `${baseName}.vtt`) : null;
+    const timecodedTxtPath = item.outputOptions.timecodedTxt ? path.join(outDir, 'transcripts', `${baseName}_timecoded.txt`) : null;
+
+    const jobFilePath = await writeJobJsonOutput({
+      outputDirectory: outDir,
+      baseName,
+      source: {
+        fileName: path.basename(item.sourcePath),
+        originalPath: item.sourcePath,
+        durationSeconds
+      },
+      settings: {
+        model: item.model,
+        language: item.language,
+        timestamps: true,
+        outputOptions: item.outputOptions
+      },
+      outputs: {
+        txtPath: toRelativeOutputPath(outDir, txtPath),
+        srtPath: toRelativeOutputPath(outDir, srtPath),
+        vttPath: toRelativeOutputPath(outDir, vttPath),
+        timecodedTxtPath: toRelativeOutputPath(outDir, timecodedTxtPath)
+      },
+      transcript: {
+        rawText: payload.transcriptText,
+        segments: payload.segments
+      },
+      status: 'completed',
+      transcripterVersion: app.getVersion(),
+      createdAt: new Date().toISOString(),
+      jobId: item.id
+    });
+
+    item.outputFiles = [...outputFiles, jobFilePath];
     item.status = 'done';
     item.progress = 100;
     item.error = undefined;
@@ -485,13 +626,63 @@ processor.on('complete', async (payload) => {
       event: 'job.completed',
       jobId: item.id,
       filePath: item.sourcePath,
-      message: `Completed ${path.basename(item.sourcePath)}. Wrote ${outputFiles.length} output file(s).`
+      message: `Completed ${path.basename(item.sourcePath)}. Wrote ${item.outputFiles.length} output file(s).`
     });
   } catch (error) {
     item.status = 'failed';
     item.progress = 0;
     item.error = error instanceof Error ? error.message : String(error);
     finalizeElapsedTiming(item);
+
+    const durationSeconds = await probeDurationSeconds(item.sourcePath);
+    try {
+      const jobFilePath = await writeJobJsonOutput({
+        outputDirectory: outDir,
+        baseName,
+        source: {
+          fileName: path.basename(item.sourcePath),
+          originalPath: item.sourcePath,
+          durationSeconds
+        },
+        settings: {
+          model: item.model,
+          language: item.language,
+          timestamps: true,
+          outputOptions: item.outputOptions
+        },
+        outputs: {
+          txtPath: toRelativeOutputPath(outDir, item.outputOptions.txt ? path.join(outDir, 'transcripts', `${baseName}.txt`) : null),
+          srtPath: toRelativeOutputPath(outDir, item.outputOptions.srt ? path.join(outDir, 'subtitles', `${baseName}.srt`) : null),
+          vttPath: toRelativeOutputPath(outDir, item.outputOptions.vtt ? path.join(outDir, 'subtitles', `${baseName}.vtt`) : null),
+          timecodedTxtPath: toRelativeOutputPath(
+            outDir,
+            item.outputOptions.timecodedTxt ? path.join(outDir, 'transcripts', `${baseName}_timecoded.txt`) : null
+          )
+        },
+        transcript: {
+          rawText: '',
+          segments: []
+        },
+        status: 'failed',
+        transcripterVersion: app.getVersion(),
+        createdAt: new Date().toISOString(),
+        jobId: item.id,
+        error: {
+          message: item.error,
+          code: getErrorCode(item.error)
+        }
+      });
+      item.outputFiles = [jobFilePath];
+    } catch (jobError) {
+      appendLog({
+        level: 'error',
+        event: 'job.json_write_failed',
+        jobId: item.id,
+        filePath: item.sourcePath,
+        message: `Failed writing job JSON for ${path.basename(item.sourcePath)}: ${jobError instanceof Error ? jobError.message : String(jobError)}`
+      });
+    }
+
     if (activeRun) {
       activeRun.failed += 1;
     }
@@ -509,7 +700,7 @@ processor.on('complete', async (payload) => {
   void processNextPending();
 });
 
-processor.on('error', (payload) => {
+processor.on('error', async (payload) => {
   if (payload.jobId === 'worker') {
     appendLog({ level: 'error', event: 'worker.error', message: `Worker error: ${payload.error}` });
     return;
@@ -524,6 +715,59 @@ processor.on('error', (payload) => {
   item.error = payload.error;
   item.progress = payload.canceled ? item.progress : 0;
   finalizeElapsedTiming(item);
+
+  const outDir = item.outputDirectory;
+  const baseName = path.parse(item.sourcePath).name;
+  const durationSeconds = await probeDurationSeconds(item.sourcePath);
+
+  try {
+    const jobFilePath = await writeJobJsonOutput({
+      outputDirectory: outDir,
+      baseName,
+      source: {
+        fileName: path.basename(item.sourcePath),
+        originalPath: item.sourcePath,
+        durationSeconds
+      },
+      settings: {
+        model: item.model,
+        language: item.language,
+        timestamps: true,
+        outputOptions: item.outputOptions
+      },
+      outputs: {
+        txtPath: toRelativeOutputPath(outDir, item.outputOptions.txt ? path.join(outDir, 'transcripts', `${baseName}.txt`) : null),
+        srtPath: toRelativeOutputPath(outDir, item.outputOptions.srt ? path.join(outDir, 'subtitles', `${baseName}.srt`) : null),
+        vttPath: toRelativeOutputPath(outDir, item.outputOptions.vtt ? path.join(outDir, 'subtitles', `${baseName}.vtt`) : null),
+        timecodedTxtPath: toRelativeOutputPath(
+          outDir,
+          item.outputOptions.timecodedTxt ? path.join(outDir, 'transcripts', `${baseName}_timecoded.txt`) : null
+        )
+      },
+      transcript: {
+        rawText: '',
+        segments: []
+      },
+      status: 'failed',
+      transcripterVersion: app.getVersion(),
+      createdAt: new Date().toISOString(),
+      jobId: item.id,
+      error: {
+        message: item.error,
+        code: payload.canceled ? 'JOB_CANCELED' : getErrorCode(item.error)
+      }
+    });
+    item.outputFiles = [jobFilePath];
+  } catch (jobError) {
+    appendLog({
+      level: 'error',
+      event: 'job.json_write_failed',
+      jobId: item.id,
+      filePath: item.sourcePath,
+      message: `Failed writing job JSON for ${path.basename(item.sourcePath)}: ${jobError instanceof Error ? jobError.message : String(jobError)}`
+    });
+  }
+
   if (activeRun) {
     if (payload.canceled) {
       activeRun.canceled += 1;
@@ -790,7 +1034,7 @@ ipcMain.handle('queue:start', async () => {
       if (activeRun) {
         activeRun.fatalError = runtimeError;
       }
-      failPendingJobsForFatalError(runtimeError);
+      await failPendingJobsForFatalError(runtimeError);
       appendLog({
         level: 'error',
         event: 'runtime.invalid',
