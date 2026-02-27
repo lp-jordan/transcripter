@@ -116,6 +116,8 @@ export type ProjectBundleInput = {
 export type ProjectBundleValidationSummary = {
   includedCount: number;
   excludedCount: number;
+  excludedFailedCount: number;
+  jsonParseFailureCount: number;
   emptyTranscriptCount: number;
   duplicateFilenameCount: number;
   hasExistingProjectJson: boolean;
@@ -129,6 +131,8 @@ export type ProjectBundleBuildSummary = {
   outputPath: string;
   includedCount: number;
   excludedCount: number;
+  excludedFailedCount: number;
+  jsonParseFailureCount: number;
   emptyTranscriptCount: number;
   duplicateFilenameCount: number;
   overwritten: boolean;
