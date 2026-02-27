@@ -32,7 +32,7 @@
   },
   "build": {
     "appId": "com.example.transcripter",
-    "productName": "Transcripter",
+    "productName": "LeaderScript",
     "directories": {
       "output": "release",
       "buildResources": "build"
