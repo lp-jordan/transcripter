@@ -31,6 +31,7 @@
           </button>
           <section id="tools-menu" class="tools-menu" hidden>
             <button id="open-merge-transcripts" class="tools-menu-item" type="button">Merge Transcripts…</button>
+            <button id="open-build-project-bundle" class="tools-menu-item" type="button">Build Project Bundle…</button>
           </section>
         </div>
       </header>
@@ -48,6 +49,58 @@
           <ul id="merge-file-list" class="merge-file-list"></ul>
           <div class="modal-actions">
             <button id="compile-merged-transcript" class="button-primary" type="button">Compile</button>
+          </div>
+        </form>
+      </dialog>
+
+      <dialog id="build-project-bundle-modal" class="modal">
+        <form method="dialog" class="modal-shell bundle-modal-shell">
+          <div class="modal-header">
+            <h2>Build Project Bundle</h2>
+            <button id="close-build-project-bundle" type="button" class="button-tertiary">✕</button>
+          </div>
+
+          <label class="modal-field" for="bundle-project-name">
+            <span>Project Name</span>
+            <input id="bundle-project-name" type="text" placeholder="Enter project name" />
+          </label>
+
+          <section class="bundle-input-section">
+            <p class="modal-copy">Input Selectors</p>
+            <div class="bundle-actions-row">
+              <button id="pick-bundle-jobs-folder" class="button-secondary" type="button">Choose Jobs Folder</button>
+              <button id="pick-bundle-job-files" class="button-secondary" type="button">Add .job.json Files</button>
+            </div>
+            <p id="bundle-jobs-folder-display" class="modal-muted">No jobs folder selected.</p>
+            <section id="bundle-job-drop-zone" class="merge-drop-zone bundle-drop-zone" aria-label="Bundle job file drop zone">
+              <p>Drag and drop .job.json files here</p>
+            </section>
+            <ul id="bundle-job-file-list" class="merge-file-list"></ul>
+          </section>
+
+          <section class="bundle-output-section">
+            <p class="modal-copy">Output Folder</p>
+            <div class="bundle-actions-row">
+              <button id="pick-bundle-output-folder" class="button-secondary" type="button">Choose Output Folder</button>
+            </div>
+            <p id="bundle-output-folder-display" class="modal-muted">No output folder selected.</p>
+          </section>
+
+          <section id="bundle-validation-summary" class="bundle-validation-summary" aria-live="polite">
+            <p>Run validation to review included/excluded files and warnings.</p>
+          </section>
+
+          <section id="bundle-overwrite-confirmation" class="bundle-overwrite" hidden>
+            <p><strong>project.json already exists in the selected output folder.</strong></p>
+            <label class="settings-check">
+              <input id="bundle-overwrite-approval" type="checkbox" />
+              I understand this will overwrite the existing project.json.
+            </label>
+          </section>
+
+          <div class="modal-actions bundle-modal-actions">
+            <button id="validate-project-bundle" class="button-secondary" type="button">Validate</button>
+            <button id="build-project-bundle" class="button-primary" type="button">Build Bundle</button>
           </div>
         </form>
       </dialog>
