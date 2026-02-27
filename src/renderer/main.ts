@@ -50,9 +50,7 @@ const bundleJobDropZone = document.getElementById('bundle-job-drop-zone') as HTM
 const bundleJobFileList = document.getElementById('bundle-job-file-list') as HTMLUListElement;
 const pickBundleOutputFolderButton = document.getElementById('pick-bundle-output-folder') as HTMLButtonElement;
 const bundleOutputFolderDisplay = document.getElementById('bundle-output-folder-display') as HTMLParagraphElement;
-const validateProjectBundleButton = document.getElementById('validate-project-bundle') as HTMLButtonElement;
 const buildProjectBundleButton = document.getElementById('build-project-bundle') as HTMLButtonElement;
-const bundleValidationSummary = document.getElementById('bundle-validation-summary') as HTMLElement;
 const bundleOverwriteConfirmation = document.getElementById('bundle-overwrite-confirmation') as HTMLElement;
 const bundleOverwriteApproval = document.getElementById('bundle-overwrite-approval') as HTMLInputElement;
 const bundleIncludeExports = document.getElementById('bundle-include-exports') as HTMLInputElement;
@@ -78,7 +76,7 @@ let mergeTranscriptPaths: string[] = [];
 let bundleJobFolderPath = '';
 let bundleJobFilePaths: string[] = [];
 let bundleOutputFolderPath = '';
-let latestBundleValidation: ProjectBundleValidationSummary | null = null;
+let bundleRequiresOverwriteConfirmation = false;
 const appLogs: AppLogEntry[] = [];
 const MAX_CONSOLE_LINES = 200;
 let activeJobStartedAt = 0;
@@ -240,47 +238,41 @@ const getProjectBundleInput = (): ProjectBundleInput => ({
   includeExports: bundleIncludeExports.checked
 });
 
-const renderBundleValidationSummary = async () => {
+const updateBuildBundleButtonState = () => {
+  buildProjectBundleButton.disabled =
+    bundleProjectNameInput.value.trim().length === 0 ||
+    bundleOutputFolderPath.length === 0 ||
+    bundleJobFilePaths.length === 0 ||
+    (bundleRequiresOverwriteConfirmation && !bundleOverwriteApproval.checked);
+};
+
+const refreshBundleOverwriteState = async () => {
   const input = getProjectBundleInput();
   const validation = await window.transcripter.projectBundle.validate(input);
 
   if (!validation.ok) {
-    latestBundleValidation = null;
-    bundleValidationSummary.innerHTML = `<p>${validation.error}</p>`;
+    bundleRequiresOverwriteConfirmation = false;
     bundleOverwriteConfirmation.hidden = true;
     bundleOverwriteApproval.checked = false;
-    buildProjectBundleButton.disabled = true;
+    updateBuildBundleButtonState();
     return;
   }
 
-  latestBundleValidation = validation.data;
-  const messages = [
-    `Included: ${validation.data.includedCount}`,
-    `Excluded: ${validation.data.excludedCount}`,
-    `Empty transcript warnings: ${validation.data.emptyTranscriptCount}`,
-    `Duplicate filename warnings: ${validation.data.duplicateFilenameCount}`,
-    ...validation.data.warnings
-  ];
-
-  bundleValidationSummary.innerHTML = `<ul>${messages.map((message) => `<li>${message}</li>`).join('')}</ul>`;
+  bundleRequiresOverwriteConfirmation = validation.data.hasExistingProjectJson;
   bundleOverwriteConfirmation.hidden = !validation.data.hasExistingProjectJson;
 
   if (!validation.data.hasExistingProjectJson) {
     bundleOverwriteApproval.checked = false;
   }
 
-  buildProjectBundleButton.disabled =
-    bundleProjectNameInput.value.trim().length === 0 ||
-    bundleOutputFolderPath.length === 0 ||
-    bundleJobFilePaths.length === 0 ||
-    (validation.data.hasExistingProjectJson && !bundleOverwriteApproval.checked);
+  updateBuildBundleButtonState();
 };
 
 const renderBundleUi = async () => {
   bundleJobsFolderDisplay.textContent = bundleJobFolderPath.length > 0 ? bundleJobFolderPath : 'No jobs folder selected.';
   bundleOutputFolderDisplay.textContent = bundleOutputFolderPath.length > 0 ? bundleOutputFolderPath : 'No output folder selected.';
   renderBundleFileList();
-  await renderBundleValidationSummary();
+  await refreshBundleOverwriteState();
 };
 
 const resetBundleUi = async () => {
@@ -290,9 +282,8 @@ const resetBundleUi = async () => {
   bundleOutputFolderPath = '';
   bundleOverwriteApproval.checked = false;
   bundleIncludeExports.checked = false;
-  latestBundleValidation = null;
+  bundleRequiresOverwriteConfirmation = false;
   bundleOverwriteConfirmation.hidden = true;
-  bundleValidationSummary.innerHTML = '<p>Run validation to review included/excluded files and warnings.</p>';
   await renderBundleUi();
 };
 
@@ -831,32 +822,28 @@ pickBundleOutputFolderButton.addEventListener('click', async () => {
   await renderBundleUi();
 });
 
-validateProjectBundleButton.addEventListener('click', () => {
-  void renderBundleValidationSummary();
-});
-
 bundleOverwriteApproval.addEventListener('change', () => {
-  void renderBundleValidationSummary();
+  updateBuildBundleButtonState();
 });
 
 bundleProjectNameInput.addEventListener('input', () => {
-  void renderBundleValidationSummary();
+  void refreshBundleOverwriteState();
 });
 
 bundleIncludeExports.addEventListener('change', () => {
-  void renderBundleValidationSummary();
+  void refreshBundleOverwriteState();
 });
 
 buildProjectBundleButton.addEventListener('click', async () => {
-  await renderBundleValidationSummary();
-  if (buildProjectBundleButton.disabled || !latestBundleValidation) {
+  updateBuildBundleButtonState();
+  if (buildProjectBundleButton.disabled) {
     return;
   }
 
   const result = await window.transcripter.projectBundle.build(getProjectBundleInput());
   if (!result.ok) {
     window.alert(`Bundle build failed: ${result.error}`);
-    await renderBundleValidationSummary();
+    await refreshBundleOverwriteState();
     return;
   }
 
