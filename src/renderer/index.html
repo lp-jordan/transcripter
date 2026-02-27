@@ -16,7 +16,41 @@
     <main class="layout">
       <header class="app-header">
         <h1>LeaderPass Transcription</h1>
+        <div class="header-tools">
+          <button
+            id="tools-trigger"
+            class="button-tertiary"
+            type="button"
+            aria-haspopup="true"
+            aria-expanded="false"
+            aria-controls="tools-menu"
+            aria-label="Open tools menu"
+            title="Tools"
+          >
+            ⋮
+          </button>
+          <section id="tools-menu" class="tools-menu" hidden>
+            <button id="open-merge-transcripts" class="tools-menu-item" type="button">Merge Transcripts…</button>
+          </section>
+        </div>
       </header>
+
+      <dialog id="merge-transcripts-modal" class="modal">
+        <form method="dialog" class="modal-shell">
+          <div class="modal-header">
+            <h2>Merge Transcripts</h2>
+            <button id="close-merge-transcripts" type="button" class="button-tertiary">✕</button>
+          </div>
+          <p class="modal-copy">Drop .txt files below. They will be merged in the listed order.</p>
+          <section id="merge-drop-zone" class="merge-drop-zone" aria-label="Merge transcript drop zone">
+            <p>Drag and drop .txt files here</p>
+          </section>
+          <ul id="merge-file-list" class="merge-file-list"></ul>
+          <div class="modal-actions">
+            <button id="compile-merged-transcript" class="button-primary" type="button">Compile</button>
+          </div>
+        </form>
+      </dialog>
 
       <section id="drop-zone" class="drop-zone">
         <p>Drag and drop files here to add to the queue.</p>
