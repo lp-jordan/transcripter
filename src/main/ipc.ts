@@ -40,6 +40,7 @@ const defaultSettings: AppSettings = {
 
 const queue: QueueItem[] = [];
 const archiveBatches: ArchiveBatch[] = [];
+const completedQueueStatuses: QueueItem['status'][] = ['done', 'failed', 'canceled'];
 const ffmpegRuntime = resolveFfmpegPathWithMeta();
 const whisperRuntime = resolveWhisperPathWithMeta();
 const whisperModelRuntime = resolveWhisperModelDirectoryWithMeta();
@@ -64,6 +65,7 @@ type RunSummary = {
 };
 
 let activeRun: RunSummary | null = null;
+let quitAfterArchiving = false;
 
 const getErrorCode = (errorMessage: string): string => {
   const normalized = errorMessage.toLowerCase();
@@ -251,6 +253,48 @@ const readArchiveBatches = async (): Promise<ArchiveBatch[]> => {
 const persistArchiveBatches = async (): Promise<void> => {
   await fs.mkdir(path.dirname(archivePath), { recursive: true });
   await fs.writeFile(archivePath, JSON.stringify(archiveBatches, null, 2), 'utf8');
+};
+
+const archiveCompletedQueueItems = async (): Promise<{ archivedItemCount: number; archivedBatchCount: number }> => {
+  const completedItems = queue.filter((item) => completedQueueStatuses.includes(item.status));
+  if (completedItems.length === 0) {
+    return { archivedItemCount: 0, archivedBatchCount: 0 };
+  }
+
+  const remainingItems = queue.filter((item) => !completedQueueStatuses.includes(item.status));
+  const byBatch = new Map<string, QueueItem[]>();
+  for (const item of completedItems) {
+    const batchId = item.batchId ?? `manual_${item.id}`;
+    const existing = byBatch.get(batchId);
+    if (existing) {
+      existing.push(item);
+    } else {
+      byBatch.set(batchId, [item]);
+    }
+  }
+
+  const archivedAt = new Date().toISOString();
+  for (const [batchId, items] of byBatch.entries()) {
+    archiveBatches.unshift({
+      id: batchId,
+      startedAt: items[0]?.batchStartedAt ?? archivedAt,
+      archivedAt,
+      items: [...items]
+    });
+  }
+
+  queue.length = 0;
+  queue.push(...remainingItems);
+  await persistArchiveBatches();
+  emitQueueState();
+
+  appendLog({
+    level: 'info',
+    event: 'queue.archived',
+    message: `Archived ${completedItems.length} completed queue item(s) across ${byBatch.size} batch(es).`
+  });
+
+  return { archivedItemCount: completedItems.length, archivedBatchCount: byBatch.size };
 };
 
 const emitQueueState = () => {
@@ -912,8 +956,40 @@ processor.on('error', async (payload) => {
   void processNextPending();
 });
 
-app.on('before-quit', () => {
-  processor.dispose();
+app.on('before-quit', (event) => {
+  if (quitAfterArchiving) {
+    processor.dispose();
+    return;
+  }
+
+  const hasUnarchivedCompletedJobs = queue.some((item) => completedQueueStatuses.includes(item.status));
+  if (!hasUnarchivedCompletedJobs) {
+    processor.dispose();
+    return;
+  }
+
+  event.preventDefault();
+  quitAfterArchiving = true;
+
+  void (async () => {
+    try {
+      const archived = await archiveCompletedQueueItems();
+      appendLog({
+        level: 'info',
+        event: 'app.before_quit_archived_completed',
+        message: `Archived ${archived.archivedItemCount} completed queue item(s) before app quit.`
+      });
+    } catch (error) {
+      appendLog({
+        level: 'error',
+        event: 'app.before_quit_archive_failed',
+        message: `Failed to archive completed queue items before quit: ${error instanceof Error ? error.message : String(error)}`
+      });
+    } finally {
+      processor.dispose();
+      app.quit();
+    }
+  })();
 });
 
 ipcMain.handle('file:readText', async (_event, filePath: string) => {
@@ -1174,51 +1250,18 @@ ipcMain.handle('queue:resetSelected', (_event, ids: string[]) => {
   return { ok: true as const };
 });
 
-ipcMain.handle('queue:archiveCompleted', () => {
-  const completedItems = queue.filter((item) => ['done', 'failed', 'canceled'].includes(item.status));
-  const remainingItems = queue.filter((item) => !['done', 'failed', 'canceled'].includes(item.status));
-
-  const byBatch = new Map<string, QueueItem[]>();
-  for (const item of completedItems) {
-    const batchId = item.batchId ?? `manual_${item.id}`;
-    const existing = byBatch.get(batchId);
-    if (existing) {
-      existing.push(item);
-    } else {
-      byBatch.set(batchId, [item]);
-    }
-  }
-
-  const archivedAt = new Date().toISOString();
-  for (const [batchId, items] of byBatch.entries()) {
-    archiveBatches.unshift({
-      id: batchId,
-      startedAt: items[0]?.batchStartedAt ?? archivedAt,
-      archivedAt,
-      items: [...items]
-    });
-  }
-
-  queue.length = 0;
-  queue.push(...remainingItems);
-  void persistArchiveBatches().catch((error) => {
+ipcMain.handle('queue:archiveCompleted', async () => {
+  try {
+    await archiveCompletedQueueItems();
+    return { ok: true as const };
+  } catch (error) {
     appendLog({
       level: 'error',
       event: 'queue.archive_persist_failed',
       message: `Failed to persist archive batches: ${error instanceof Error ? error.message : String(error)}`
     });
-  });
-  emitQueueState();
-
-  if (completedItems.length > 0) {
-    appendLog({
-      level: 'info',
-      event: 'queue.archived',
-      message: `Archived ${completedItems.length} completed queue item(s) across ${byBatch.size} batch(es).`
-    });
+    return { ok: false as const, error: 'Failed to archive completed queue items.' };
   }
-
-  return { ok: true as const };
 });
 
 
