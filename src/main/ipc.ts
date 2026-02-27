@@ -954,6 +954,21 @@ ipcMain.handle('projectBundle:pickJobJsonFiles', async () => {
   return result.filePaths.filter((filePath) => filePath.toLowerCase().endsWith('.job.json'));
 });
 
+ipcMain.handle('projectBundle:listJobJsonFilesInFolder', async (_event, folderPath?: string) => {
+  if (typeof folderPath !== 'string' || folderPath.trim().length === 0) {
+    return [] as string[];
+  }
+
+  try {
+    const entries = await fs.readdir(folderPath, { withFileTypes: true });
+    return entries
+      .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.job.json'))
+      .map((entry) => path.join(folderPath, entry.name));
+  } catch {
+    return [] as string[];
+  }
+});
+
 ipcMain.handle('projectBundle:pickOutputFolder', async (_event, defaultPath?: string) => {
   const result = await dialog.showOpenDialog({
     defaultPath,

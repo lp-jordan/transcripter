@@ -216,6 +216,11 @@ const appendBundleJobPaths = (paths: string[]) => {
   bundleJobFilePaths = [...new Set([...bundleJobFilePaths, ...filtered])];
 };
 
+const appendBundleJobPathsFromFolder = async (folderPath: string) => {
+  const paths = await window.transcripter.projectBundle.listJobJsonFilesInFolder(folderPath);
+  appendBundleJobPaths(paths);
+};
+
 const renderBundleFileList = () => {
   bundleJobFileList.innerHTML = '';
 
@@ -240,7 +245,7 @@ const updateBuildBundleButtonState = () => {
   buildProjectBundleButton.disabled =
     bundleProjectNameInput.value.trim().length === 0 ||
     bundleOutputFolderPath.length === 0 ||
-    bundleJobFilePaths.length === 0;
+    (bundleJobFolderPath.length === 0 && bundleJobFilePaths.length === 0);
 };
 
 const refreshBundleOverwriteState = async () => {
@@ -791,6 +796,7 @@ pickBundleJobsFolderButton.addEventListener('click', async () => {
   }
 
   bundleJobFolderPath = selectedPath;
+  await appendBundleJobPathsFromFolder(selectedPath);
   await renderBundleUi();
 });
 
