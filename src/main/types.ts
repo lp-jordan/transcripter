@@ -104,3 +104,49 @@ export type AppLogEntry = {
   jobId?: string;
   filePath?: string;
 };
+
+export type ProjectBundleInput = {
+  projectName: string;
+  jobsFolderPath?: string;
+  jobFilePaths?: string[];
+  outputFolderPath: string;
+  overwriteApproved?: boolean;
+};
+
+export type ProjectBundleValidationSummary = {
+  includedCount: number;
+  excludedCount: number;
+  emptyTranscriptCount: number;
+  duplicateFilenameCount: number;
+  hasExistingProjectJson: boolean;
+  requiresOverwriteConfirmation: boolean;
+  warnings: string[];
+  includedJobPaths: string[];
+  excludedJobPaths: string[];
+};
+
+export type ProjectBundleBuildSummary = {
+  outputPath: string;
+  includedCount: number;
+  excludedCount: number;
+  emptyTranscriptCount: number;
+  duplicateFilenameCount: number;
+  overwritten: boolean;
+};
+
+export type ProjectBundleResponse<T> =
+  | {
+      ok: true;
+      data: T;
+    }
+  | {
+      ok: false;
+      error: string;
+      code:
+        | 'INVALID_INPUT'
+        | 'NO_JOB_FILES'
+        | 'OUTPUT_FOLDER_REQUIRED'
+        | 'OVERWRITE_CONFIRMATION_REQUIRED'
+        | 'WRITE_FAILED';
+      data?: ProjectBundleValidationSummary;
+    };
