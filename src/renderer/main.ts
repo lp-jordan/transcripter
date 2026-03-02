@@ -341,6 +341,11 @@ const pushLog = (entry: AppLogEntry) => {
 
 const getFileName = (sourcePath: string) => sourcePath.split(/[/\\]/).pop() ?? sourcePath;
 
+const getMergedTranscriptSourceLabel = (transcriptPath: string): string => {
+  const fileName = getFileName(transcriptPath);
+  return fileName.replace(/\.txt$/i, '');
+};
+
 const getStatusClassName = (status: QueueState['items'][number]['status']): string => {
   if (status === 'pending') {
     return 'status-pending';
@@ -874,11 +879,12 @@ compileMergedTranscriptButton.addEventListener('click', async () => {
   const mergedChunks = await Promise.all(
     mergeTranscriptPaths.map(async (transcriptPath) => {
       const content = await window.transcripter.file.readText(transcriptPath);
-      return content.trim();
+      const sourceLabel = getMergedTranscriptSourceLabel(transcriptPath);
+      return `=== ${sourceLabel} ===\n${content.trim()}`;
     })
   );
 
-  const mergedContent = mergedChunks.filter((chunk) => chunk.length > 0).join('\n\n');
+  const mergedContent = mergedChunks.join('\n\n');
   const savePath = await window.transcripter.settings.pickSaveFile('merged-transcript.txt');
   if (!savePath) {
     return;
