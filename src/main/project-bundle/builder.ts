@@ -42,6 +42,7 @@ type ProjectBundlePayload = {
     defaultLanguage: string | null;
     timestampsAvailable: boolean;
     formatsAvailable: string[];
+    totalTranscribedDurationSeconds: number;
   };
   videos: Array<{
     id: string;
@@ -169,6 +170,39 @@ const hasTimestamps = (transcript: unknown): boolean => {
 
     return typeof segment.start === 'number' && Number.isFinite(segment.start) && typeof segment.end === 'number' && Number.isFinite(segment.end);
   });
+};
+
+const getRecordTranscribedDurationSeconds = (record: BundleJobRecord): number => {
+  const source = isRecord(record.parsed.source) ? record.parsed.source : null;
+  const sourceDuration = source?.durationSeconds;
+  if (typeof sourceDuration === 'number' && Number.isFinite(sourceDuration) && sourceDuration >= 0) {
+    return sourceDuration;
+  }
+
+  const transcript = isRecord(record.parsed.transcript) ? record.parsed.transcript : null;
+  if (!transcript || !Array.isArray(transcript.segments)) {
+    return 0;
+  }
+
+  return transcript.segments.reduce((duration, segment) => {
+    if (!isRecord(segment)) {
+      return duration;
+    }
+
+    const start = segment.start;
+    const end = segment.end;
+    if (
+      typeof start !== 'number' ||
+      !Number.isFinite(start) ||
+      typeof end !== 'number' ||
+      !Number.isFinite(end) ||
+      end < start
+    ) {
+      return duration;
+    }
+
+    return duration + (end - start);
+  }, 0);
 };
 
 const collectFormats = (outputs: unknown): string[] => {
@@ -379,7 +413,8 @@ export const buildProjectBundle = async (
         includedJobs.map((record) => getStringValue(isRecord(record.parsed.settings) ? record.parsed.settings.language : null))
       ),
       timestampsAvailable: includedJobs.some((record) => hasTimestamps(record.parsed.transcript)),
-      formatsAvailable: [...new Set(includedJobs.flatMap((record) => collectFormats(record.parsed.outputs)))].sort((a, b) => a.localeCompare(b))
+      formatsAvailable: [...new Set(includedJobs.flatMap((record) => collectFormats(record.parsed.outputs)))].sort((a, b) => a.localeCompare(b)),
+      totalTranscribedDurationSeconds: includedJobs.reduce((total, record) => total + getRecordTranscribedDurationSeconds(record), 0)
     },
     videos: includedJobs.map((record) => ({
       id: getStringValue(record.parsed.jobId) ?? randomUUID(),
