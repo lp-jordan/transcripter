@@ -1,18 +1,26 @@
 :root {
   color-scheme: dark;
   font-family: Inter, system-ui, -apple-system, sans-serif;
-  --queue-status-muted: #94a3b8;
-  --queue-status-accent: #60a5fa;
-  --queue-status-success: #22c55e;
-  --queue-status-error: #f87171;
+  --color-primary: #1f252d;
+  --color-primary-elevated: #28313b;
+  --color-primary-muted: #161b22;
+  --color-accent: #e4b457;
+  --color-accent-soft: rgba(228, 180, 87, 0.2);
+  --color-text: #fcf7ec;
+  --color-text-muted: #b8ac95;
+  --color-border: #3a4047;
+  --queue-status-muted: #b8ac95;
+  --queue-status-accent: #e4b457;
+  --queue-status-success: #8ecf9a;
+  --queue-status-error: #ef8d8d;
   --section-title-size: 0.78rem;
-  --section-title-color: #94a3b8;
+  --section-title-color: var(--color-text-muted);
 }
 
 body {
   margin: 0;
-  background: #121316;
-  color: #e5e7eb;
+  background: #151a21;
+  color: var(--color-text);
 }
 
 h1 {
@@ -36,8 +44,8 @@ h1 {
   top: calc(100% + 0.35rem);
   min-width: 12rem;
   border-radius: 10px;
-  border: 1px solid #374151;
-  background: #111827;
+  border: 1px solid var(--color-border);
+  background: var(--color-primary);
   box-shadow: 0 14px 28px rgba(0, 0, 0, 0.35);
   padding: 0.35rem;
   z-index: 8;
@@ -49,12 +57,12 @@ h1 {
 }
 
 .modal {
-  border: 1px solid #374151;
+  border: 1px solid var(--color-border);
   border-radius: 12px;
   padding: 0;
   width: min(32rem, calc(100vw - 2rem));
-  background: #111827;
-  color: #e5e7eb;
+  background: var(--color-primary);
+  color: var(--color-text);
 }
 
 .modal::backdrop {
@@ -79,18 +87,18 @@ h1 {
 }
 
 .modal-copy {
-  color: #94a3b8;
+  color: var(--color-text-muted);
   font-size: 0.9rem;
 }
 
 .merge-drop-zone {
-  border: 2px dashed #475569;
+  border: 2px dashed var(--color-border);
   border-radius: 10px;
   min-height: 7rem;
   display: grid;
   place-content: center;
-  background: #0b1220;
-  color: #cbd5e1;
+  background: var(--color-primary-muted);
+  color: var(--color-text);
 }
 
 .merge-drop-zone.dragging {
@@ -137,12 +145,12 @@ h1 {
 }
 
 .drop-zone {
-  border: 2px dashed #3b82f6;
+  border: 2px dashed var(--color-accent);
   border-radius: 12px;
   min-height: 120px;
   display: grid;
   place-content: center;
-  background: rgba(59, 130, 246, 0.08);
+  background: var(--color-accent-soft);
 }
 
 .drop-zone.dragging {
@@ -151,7 +159,7 @@ h1 {
 }
 
 .panel {
-  background: #1f2937;
+  background: var(--color-primary-elevated);
   border-radius: 12px;
   padding: 1rem;
 }
@@ -183,26 +191,26 @@ h1 {
 }
 
 .button-primary {
-  border-color: #2563eb;
-  background: linear-gradient(180deg, #3b82f6, #2563eb);
-  color: #eff6ff;
+  border-color: #b48831;
+  background: linear-gradient(180deg, #efc97f, var(--color-accent));
+  color: #231f16;
   font-weight: 700;
   min-width: 7rem;
 }
 
 .button-primary:hover:not(:disabled) {
-  border-color: #1d4ed8;
-  background: linear-gradient(180deg, #60a5fa, #2563eb);
+  border-color: #c89837;
+  background: linear-gradient(180deg, #f4d79a, #eabf6f);
 }
 
 .button-secondary {
-  border-color: #475569;
-  background: #1e293b;
-  color: #dbeafe;
+  border-color: var(--color-border);
+  background: var(--color-primary);
+  color: var(--color-text);
 }
 
 .button-secondary:hover:not(:disabled) {
-  background: #243244;
+  background: #2d3742;
 }
 
 .button-danger {
@@ -238,14 +246,14 @@ h1 {
 }
 
 .button-tertiary {
-  border-color: #374151;
+  border-color: var(--color-border);
   background: transparent;
-  color: #9ca3af;
+  color: var(--color-text-muted);
 }
 
 .button-tertiary:hover:not(:disabled) {
-  color: #d1d5db;
-  border-color: #4b5563;
+  color: var(--color-text);
+  border-color: #4f5860;
 }
 
 
@@ -260,8 +268,8 @@ h1 {
   width: min(22rem, calc(100vw - 3rem));
   padding: 0.45rem;
   border-radius: 10px;
-  border: 1px solid #374151;
-  background: #111827;
+  border: 1px solid var(--color-border);
+  background: var(--color-primary);
   box-shadow: 0 14px 28px rgba(0, 0, 0, 0.35);
   z-index: 5;
 }
@@ -279,13 +287,13 @@ h1 {
   justify-self: start;
   border: none;
   background: transparent;
-  color: #94a3b8;
+  color: var(--color-text-muted);
   padding: 0.1rem 0.2rem;
   font-size: 0.82rem;
 }
 
 .settings-back:hover {
-  color: #d1d5db;
+  color: var(--color-text);
 }
 
 .settings-field {
@@ -318,7 +326,7 @@ h1 {
 }
 
 .settings-checkboxes legend {
-  color: #cbd5e1;
+  color: var(--color-text);
   font-size: 0.78rem;
   margin-bottom: 0.15rem;
   padding: 0;
@@ -327,8 +335,8 @@ h1 {
 
 
 .queue-window {
-  border: 1px solid #374151;
-  background: #0f172a;
+  border: 1px solid var(--color-border);
+  background: var(--color-primary-muted);
   border-radius: 10px;
   padding: 0.7rem;
   display: grid;
@@ -337,7 +345,7 @@ h1 {
 
 .queue-empty-message {
   margin: 0;
-  color: #94a3b8;
+  color: var(--color-text-muted);
   font-size: 0.85rem;
 }
 
@@ -346,7 +354,7 @@ h1 {
   align-items: center;
   gap: 0.5rem;
   margin: 0 0 0.75rem;
-  color: #cbd5e1;
+  color: var(--color-text);
   font-size: 0.85rem;
 }
 
@@ -374,7 +382,7 @@ h1 {
   display: flex;
   justify-content: space-between;
   gap: 0.75rem;
-  color: #94a3b8;
+  color: var(--color-text-muted);
   font-size: 0.76rem;
 }
 
@@ -383,8 +391,8 @@ h1 {
   grid-template-columns: 1fr auto;
   align-items: center;
   gap: 0.55rem;
-  background: #111827;
-  border: 1px solid #374151;
+  background: var(--color-primary);
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   padding: 0.55rem 0.65rem 0.8rem;
   position: relative;
@@ -441,7 +449,7 @@ h1 {
 }
 
 .queue-item-source {
-  color: #f9fafb;
+  color: var(--color-text);
   font-weight: 600;
   min-width: 0;
   overflow: hidden;
@@ -459,7 +467,7 @@ h1 {
 }
 
 .queue-item-meta {
-  color: #9aa7bc;
+  color: var(--color-text-muted);
   font-size: 0.72rem;
   line-height: 1.25;
 }
@@ -512,9 +520,9 @@ label {
 input,
 button,
 select {
-  border: 1px solid #4b5563;
+  border: 1px solid var(--color-border);
   border-radius: 6px;
-  background: #111827;
+  background: var(--color-primary);
   color: inherit;
   padding: 0.55rem 0.7rem;
 }
@@ -566,8 +574,8 @@ button:disabled {
   gap: 0.6rem;
   padding: 0.8rem;
   border-radius: 12px;
-  background: rgba(17, 24, 39, 0.88);
-  border: 1px solid rgba(71, 85, 105, 0.9);
+  background: rgba(31, 37, 45, 0.92);
+  border: 1px solid rgba(58, 64, 71, 0.95);
   backdrop-filter: blur(10px);
 }
 
@@ -582,9 +590,9 @@ button:disabled {
   overflow: auto;
   padding: 0.75rem;
   border-radius: 8px;
-  background: #0b1220;
-  border: 1px solid #334155;
-  color: #d1d5db;
+  background: var(--color-primary-muted);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
   font-size: 0.82rem;
   line-height: 1.5;
@@ -594,8 +602,8 @@ button:disabled {
 
 .archive-window {
   margin-top: 0.9rem;
-  border: 1px solid #334155;
-  background: #0b1220;
+  border: 1px solid var(--color-border);
+  background: var(--color-primary-muted);
   border-radius: 10px;
   padding: 0.7rem;
 }
@@ -613,7 +621,7 @@ button:disabled {
 
 .archive-empty-message {
   margin: 0;
-  color: #94a3b8;
+  color: var(--color-text-muted);
   font-size: 0.84rem;
 }
 
@@ -642,7 +650,7 @@ button:disabled {
 .archive-day-title {
   margin: 0;
   font-size: 0.8rem;
-  color: #93c5fd;
+  color: var(--color-accent);
   text-transform: uppercase;
   letter-spacing: 0.03em;
 }
@@ -653,15 +661,15 @@ button:disabled {
 }
 
 .archive-batch details {
-  border: 1px solid #334155;
+  border: 1px solid var(--color-border);
   border-radius: 8px;
-  background: #111827;
+  background: var(--color-primary);
   padding: 0.45rem 0.55rem;
 }
 
 .archive-batch summary {
   cursor: pointer;
-  color: #e2e8f0;
+  color: var(--color-text);
   font-size: 0.85rem;
 }
 
@@ -693,7 +701,7 @@ button:disabled {
 
 .archive-file-elapsed {
   font-size: 0.75rem;
-  color: #94a3b8;
+  color: var(--color-text-muted);
   white-space: nowrap;
 }
 
@@ -715,7 +723,7 @@ button:disabled {
 .modal-muted {
   margin: 0;
   font-size: 0.8rem;
-  color: #9ca3af;
+  color: var(--color-text-muted);
 }
 
 .bundle-modal-shell {
@@ -730,9 +738,9 @@ button:disabled {
   display: grid;
   gap: 0.5rem;
   padding: 0.65rem;
-  border: 1px solid #334155;
+  border: 1px solid var(--color-border);
   border-radius: 10px;
-  background: #0b1220;
+  background: var(--color-primary-muted);
 }
 
 .bundle-actions-row {
@@ -753,7 +761,7 @@ button:disabled {
 
 .bundle-validation-summary ul {
   padding-left: 1.15rem;
-  color: #cbd5e1;
+  color: var(--color-text);
 }
 
 .bundle-modal-actions {
