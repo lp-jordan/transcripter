@@ -589,6 +589,11 @@ const addFiles = async (paths: string[]) => {
   await window.transcripter.queue.add(paths);
 };
 
+const openQueueFilePicker = async () => {
+  const selectedPaths = await window.transcripter.queue.pickFiles();
+  await addFiles(selectedPaths);
+};
+
 const applySettingsToUi = (settings: Awaited<ReturnType<typeof window.transcripter.settings.get>>) => {
   outputDirectoryInput.value = settings.outputDirectory;
   modelSelect.value = settings.model;
@@ -659,9 +664,21 @@ dropZone.addEventListener('drop', async (event: DragEvent) => {
   await addFiles(paths);
 });
 
+dropZone.addEventListener('click', () => {
+  void openQueueFilePicker();
+});
+
+dropZone.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' && event.key !== ' ') {
+    return;
+  }
+
+  event.preventDefault();
+  void openQueueFilePicker();
+});
+
 addFilesButton.addEventListener('click', async () => {
-  const selectedPaths = await window.transcripter.projectBundle.pickJobJsonFiles();
-  await addFiles(selectedPaths);
+  await openQueueFilePicker();
 });
 
 removeSelectedButton.addEventListener('click', async () => {
