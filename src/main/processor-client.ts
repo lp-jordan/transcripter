@@ -63,6 +63,36 @@ export class ProcessorClient extends EventEmitter<WorkerEvents> {
     });
   }
 
+  private async describeExecutableFailure(label: string, executablePath: string): Promise<string> {
+    const runtimeDirectory = path.dirname(executablePath);
+
+    try {
+      const executableStats = await fs.stat(executablePath);
+      if (!executableStats.isFile()) {
+        return `${label} exists but is not a file at: ${executablePath}`;
+      }
+
+      try {
+        await fs.access(executablePath, fsConstants.R_OK | fsConstants.X_OK);
+      } catch {
+        return `${label} exists but is not executable at: ${executablePath}`;
+      }
+    } catch {
+      try {
+        const runtimeStats = await fs.stat(runtimeDirectory);
+        if (!runtimeStats.isDirectory()) {
+          return `${label} is missing at: ${executablePath}. Runtime folder exists but is not a directory: ${runtimeDirectory}`;
+        }
+
+        return `${label} is missing at: ${executablePath}. Runtime folder exists at: ${runtimeDirectory}`;
+      } catch {
+        return `${label} is missing at: ${executablePath}. Runtime folder is missing at: ${runtimeDirectory}`;
+      }
+    }
+
+    return `${label} is missing or not executable at: ${executablePath}`;
+  }
+
   async validateRuntime(model: WhisperModel): Promise<void> {
     const failures: string[] = [];
 
@@ -75,7 +105,7 @@ export class ProcessorClient extends EventEmitter<WorkerEvents> {
     try {
       await fs.access(this.whisperPath, fsConstants.R_OK | fsConstants.X_OK);
     } catch {
-      failures.push(`whisper.cpp executable is missing or not executable at: ${this.whisperPath}`);
+      failures.push(await this.describeExecutableFailure('whisper.cpp executable', this.whisperPath));
     }
 
     try {

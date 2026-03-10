@@ -13,11 +13,12 @@
     "build:main": "esbuild src/main/main.ts --bundle --platform=node --target=node20 --external:electron --outfile=dist/main/main.js",
     "build:preload": "esbuild src/preload/preload.ts --bundle --platform=node --target=node20 --external:electron --outfile=dist/preload/preload.js",
     "build:renderer": "vite build",
-    "package": "npm run build && electron-builder",
-    "package:win": "npm run build && electron-builder --win",
-    "package:mac": "npm run build && electron-builder --mac",
+    "package": "npm run build && npm run prepare:runtime && electron-builder",
+    "package:win": "npm run build && npm run prepare:runtime && electron-builder --win",
+    "package:mac": "npm run build && npm run prepare:runtime && electron-builder --mac",
     "build:worker": "esbuild src/main/processing-worker.ts --bundle --platform=node --target=node20 --outfile=dist/main/processing-worker.js",
-    "postinstall": "node scripts/download-whisper-base-model.mjs"
+    "postinstall": "node scripts/download-whisper-base-model.mjs && node scripts/setup-whisper-runtime.mjs",
+    "prepare:runtime": "node scripts/setup-whisper-runtime.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.13.10",

@@ -4,8 +4,8 @@ import { app } from 'electron';
 import type { WhisperModel } from './types';
 
 const whisperExecutableNames = process.platform === 'win32'
-  ? ['main.exe', 'whisper.exe']
-  : ['main', 'whisper'];
+  ? ['main.exe', 'whisper.exe', 'whisper-cli.exe']
+  : ['main', 'whisper', 'whisper-cli'];
 
 type RuntimePathResolution = {
   resolvedPath: string;
@@ -13,14 +13,34 @@ type RuntimePathResolution = {
   mode: 'packaged' | 'dev';
 };
 
-const findExistingPath = (candidates: string[]): string | null => {
+const findExecutablePath = (candidates: string[]): string | null => {
   for (const candidate of candidates) {
     if (!path.isAbsolute(candidate)) {
       continue;
     }
 
-    if (fs.existsSync(candidate)) {
+    try {
+      fs.accessSync(candidate, fs.constants.R_OK | fs.constants.X_OK);
       return candidate;
+    } catch {
+      // Continue searching for an executable candidate.
+    }
+  }
+
+  return null;
+};
+
+const findReadablePath = (candidates: string[]): string | null => {
+  for (const candidate of candidates) {
+    if (!path.isAbsolute(candidate)) {
+      continue;
+    }
+
+    try {
+      fs.accessSync(candidate, fs.constants.R_OK);
+      return candidate;
+    } catch {
+      // Continue searching for a readable candidate.
     }
   }
 
@@ -39,10 +59,17 @@ const getPackagedRuntimeCandidates = (): string[] => whisperExecutableNames.map(
   (executableName) => path.join(process.resourcesPath, 'whisper-runtime', executableName)
 );
 
-const getDevRuntimeCandidates = (appPath: string): string[] => whisperExecutableNames.flatMap((executableName) => [
-  path.join(appPath, 'runtime', 'whisper-runtime', executableName),
-  path.join(appPath, 'node_modules', 'nodejs-whisper', 'cpp', 'whisper.cpp', executableName)
-]);
+const getDevRuntimeCandidates = (appPath: string): string[] => {
+  const baseDirectories = [
+    path.join(appPath, 'runtime', 'whisper-runtime'),
+    path.join(appPath, 'node_modules', 'nodejs-whisper', 'cpp', 'whisper.cpp'),
+    path.join(appPath, 'node_modules', 'nodejs-whisper', 'cpp', 'whisper.cpp', 'build', 'bin'),
+    path.join(appPath, 'whisper.cpp'),
+    path.join(appPath, 'whisper.cpp', 'build', 'bin')
+  ];
+
+  return baseDirectories.flatMap((directory) => whisperExecutableNames.map((executableName) => path.join(directory, executableName)));
+};
 
 export const resolveWhisperPathWithMeta = (): RuntimePathResolution => {
   const appPath = app.getAppPath();
@@ -51,7 +78,7 @@ export const resolveWhisperPathWithMeta = (): RuntimePathResolution => {
     ? getPackagedRuntimeCandidates()
     : getDevRuntimeCandidates(appPath);
 
-  const resolvedPath = findExistingPath(candidates) ?? candidates[0];
+  const resolvedPath = findExecutablePath(candidates) ?? candidates[0];
 
   return { resolvedPath, candidates, mode };
 };
@@ -74,7 +101,7 @@ export const resolveWhisperModelDirectoryWithMeta = (): RuntimePathResolution =>
     ? getPackagedModelCandidates()
     : getDevModelCandidates(appPath);
 
-  const resolvedPath = findExistingPath(candidates) ?? candidates[0];
+  const resolvedPath = findReadablePath(candidates) ?? candidates[0];
 
   return { resolvedPath, candidates, mode };
 };

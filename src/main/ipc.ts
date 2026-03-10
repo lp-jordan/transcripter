@@ -49,8 +49,8 @@ const defaultSettings: AppSettings = {
   openaiModel: 'gpt-4.1-mini',
   anthropicApiKey: '',
   anthropicModel: 'claude-haiku-4-5-20251001',
-  openaiTimeoutMs: 20000,
-  openaiMaxRetries: 1
+  openaiTimeoutMs: 60000,
+  openaiMaxRetries: 2
 };
 
 const queue: QueueItem[] = [];

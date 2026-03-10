@@ -114,3 +114,64 @@ test('splitPodcastTranscripts falls back and writes manifest + report', async ()
   assert.equal(report.successes.length, 1);
   assert.equal(report.failures.length, 0);
 });
+
+test('requestAiSplitPlan windows long transcripts before Claude planning', async () => {
+  const segments = Array.from({ length: 240 }, (_, index) => ({
+    start: index * 15,
+    end: index * 15 + 15,
+    text: `Segment ${index + 1}.`
+  }));
+
+  let fetchCalls = 0;
+  const fetchImpl = (async (_url, init) => {
+    fetchCalls += 1;
+    const body = JSON.parse(String(init?.body ?? "{}")) as { messages?: Array<{ content?: string }> };
+    const content = body.messages?.[0]?.content ?? "{}";
+    const payload = JSON.parse(content) as { units?: Array<unknown> };
+    const unitCount = payload.units?.length ?? 0;
+    return new Response(
+      JSON.stringify({
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              chunks: [
+                {
+                  startIndex: 0,
+                  endIndex: Math.max(0, unitCount - 1),
+                  title: `Window ${fetchCalls}`,
+                  summary: 'Window summary'
+                }
+              ]
+            })
+          }
+        ]
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+  }) as typeof fetch;
+
+  const outcome = await __testables.requestAiSplitPlan(
+    segments,
+    {
+      softMinSec: 180,
+      softMaxSec: 360,
+      hardMinSec: 120,
+      hardMaxSec: 420
+    },
+    {
+      outputDirectory: 'ignored',
+      language: 'en',
+      model: 'base',
+      outputOptions: { txt: true, timecodedTxt: true, srt: true, vtt: false, json: true },
+      anthropicApiKey: 'test-key'
+    },
+    fetchImpl
+  );
+
+  assert.equal(outcome.usedWindowing, true);
+  assert.ok(fetchCalls > 1);
+  assert.ok(outcome.ranges);
+  assert.equal(outcome.ranges?.[0]?.startIndex, 0);
+  assert.equal(outcome.ranges?.[outcome.ranges.length - 1]?.endIndex, segments.length - 1);
+});

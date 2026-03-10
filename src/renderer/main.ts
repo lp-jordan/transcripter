@@ -626,7 +626,7 @@ const updateQueueProgressVisual = (item: QueueState['items'][number]) => {
 
   const displayedProgress = queueDisplayedProgress.get(item.id) ?? clampQueueProgress(item.progress);
   ref.progressFill.style.width = `${displayedProgress}%`;
-  ref.statusLabel.textContent = `${formatStatusLabel(item.status)} • ${Math.round(displayedProgress)}%`;
+  ref.statusLabel.textContent = `${formatStatusLabel(item.status)} ï¿½ ${Math.round(displayedProgress)}%`;
 };
 
 const animateQueueProgress = () => {
@@ -924,8 +924,8 @@ const applySettingsToUi = (settings: Awaited<ReturnType<typeof window.transcript
   anthropicModelInput.value = settings.anthropicModel ?? 'claude-haiku-4-5-20251001';
   podcastSplitterOutputFolderPath = settings.podcastSplitterOutputFolder?.trim() ?? '';
   renderPodcastSplitterOutput();
-  openaiTimeoutInput.value = String(settings.openaiTimeoutMs ?? 20000);
-  openaiMaxRetriesInput.value = String(settings.openaiMaxRetries ?? 1);
+  openaiTimeoutInput.value = String(settings.openaiTimeoutMs ?? 60000);
+  openaiMaxRetriesInput.value = String(settings.openaiMaxRetries ?? 2);
 };
 
 const saveSettings = async () => {

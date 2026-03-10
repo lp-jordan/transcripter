@@ -50,11 +50,12 @@ type SplitStatusEmitter = (message: string, details?: Omit<PodcastSplitterStatus
 
 const DEFAULT_OPENAI_MODEL = 'gpt-4.1-mini';
 const DEFAULT_ANTHROPIC_MODEL = 'claude-haiku-4-5-20251001';
-const DEFAULT_OPENAI_TIMEOUT_MS = 20_000;
-const DEFAULT_OPENAI_MAX_RETRIES = 1;
+const DEFAULT_OPENAI_TIMEOUT_MS = 60_000;
+const DEFAULT_OPENAI_MAX_RETRIES = 2;
 const AVERAGE_WORDS_PER_SECOND = 2.6;
 
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 const safeFileSlug = (name: string): string =>
   name
@@ -490,6 +491,10 @@ type AiPlanOutcome = {
   warning?: string;
 };
 
+type HierarchicalAiPlanOutcome = AiPlanOutcome & {
+  usedWindowing: boolean;
+};
+
 const getAnthropicErrorMessage = (status: number, responseBody: string): string => {
   if (status === 401 || status === 403) {
     return 'Claude API key was rejected (401/403). Check the Anthropic key in Settings.';
@@ -504,6 +509,28 @@ const getAnthropicErrorMessage = (status: number, responseBody: string): string 
   }
 
   return `Claude API request failed (${status})${responseBody.length > 0 ? `: ${responseBody.slice(0, 200)}` : '.'}`;
+};
+
+const LONG_TRANSCRIPT_SEGMENT_THRESHOLD = 180;
+const WINDOW_TARGET_MIN_SEC = 18 * 60;
+const WINDOW_TARGET_MAX_SEC = 28 * 60;
+const WINDOW_HARD_MIN_SEC = 12 * 60;
+const WINDOW_HARD_MAX_SEC = 35 * 60;
+
+const getCoarseWindowPolicy = (): DurationPolicy => ({
+  softMinSec: WINDOW_TARGET_MIN_SEC,
+  softMaxSec: WINDOW_TARGET_MAX_SEC,
+  hardMinSec: WINDOW_HARD_MIN_SEC,
+  hardMaxSec: WINDOW_HARD_MAX_SEC
+});
+
+const buildCoarseWindows = (segments: Segment[]): ChunkRange[] => {
+  if (segments.length === 0) {
+    return [];
+  }
+
+  const windowPolicy = getCoarseWindowPolicy();
+  return enforceDurationPolicy(deterministicSplit(segments, windowPolicy), segments, windowPolicy);
 };
 
 const requestAnthropicSplitPlan = async (
@@ -522,8 +549,8 @@ const requestAnthropicSplitPlan = async (
   }
 
   const model = settings.anthropicModel?.trim() || DEFAULT_ANTHROPIC_MODEL;
-  const timeoutMs = clamp(settings.openaiTimeoutMs ?? DEFAULT_OPENAI_TIMEOUT_MS, 3_000, 120_000);
-  const retries = clamp(settings.openaiMaxRetries ?? DEFAULT_OPENAI_MAX_RETRIES, 0, 4);
+  let timeoutMs = clamp(settings.openaiTimeoutMs ?? DEFAULT_OPENAI_TIMEOUT_MS, 10_000, 300_000);
+  let retries = clamp(settings.openaiMaxRetries ?? DEFAULT_OPENAI_MAX_RETRIES, 0, 6);
 
   const units = segments.map((segment, index) => ({
     index,
@@ -531,6 +558,13 @@ const requestAnthropicSplitPlan = async (
     endSec: Number(segment.end.toFixed(2)),
     text: segment.text.slice(0, 220)
   }));
+
+  const adaptiveTimeoutMs = clamp(45_000 + units.length * 250, 45_000, 300_000);
+  timeoutMs = Math.max(timeoutMs, adaptiveTimeoutMs);
+
+  if (units.length > 160) {
+    retries = Math.max(retries, 2);
+  }
 
   const systemPrompt = [
     'SYSTEM PROMPT',
@@ -541,22 +575,29 @@ const requestAnthropicSplitPlan = async (
     '- Each segment must begin at the start of a complete sentence, never completing a sentence left open by the previous segment.',
     '- Before finalizing each cut point, check whether the first sentence of the new segment refers back to or completes the last sentence of the previous segment. If it does, move the cut forward one sentence and check again.',
     '- Do not cut at round time intervals. Cut points must be justified by narrative logic, not timing convenience.',
+    '- In interview-format transcripts, an interviewer question must always stay with the answer that follows it. Never close a segment on an interviewer question - move the cut point to before the question begins.',
+    '- Never split a named story, case study, or example from its setup. If a speaker introduces a story by name or context (e.g. "Let me tell you about United 173" or "Here\'s a study"), the introduction and the story must remain in the same segment.',
+    '- Never split a rhetorical question or conversational handoff from the response it invites. A trailing question at the end of a segment is a signal to move the cut backward, not forward.',
     'Where to cut (look for natural break signals):',
     '- A declarative statement functioning as a personal thesis or conclusion.',
     '- A cliffhanger or threat that lands cleanly.',
     '- A scene transition - time, location, or cast of characters changes.',
     '- A shift from backstory or setup into real-time action, or vice versa.',
+    '- A transition from storytelling into lesson-drawing or application.',
     '- A moment where the emotional register resets.',
+    '- A new interviewer question that opens a genuinely new topic (only valid as a cut point if the question travels with the answer into the new segment).',
     'What to preserve within each segment:',
     '- Setup and payoff must stay together. If a detail is planted, the moment it matters must remain in the same segment.',
     '- Flashbacks or embedded stories must remain entirely within one segment.',
-    '- Escalation sequences such as a chase or shooting must not be split mid-action.',
+    '- Escalation sequences such as a chase, crisis, or argument must not be split mid-action.',
+    '- A named framework, model, or concept introduced by the speaker must stay with its initial explanation.',
+    '- Question-and-answer exchanges must not be split. The question and its answer are one unit.',
     'Output requirements:',
     '- Return JSON only with this schema: {"chunks":[{"startIndex":number,"endIndex":number,"title":string,"summary":string}]}',
     '- Indices refer to seconds derived from the transcript timestamps. For example [00:04:47] = index 287.',
     '- Indices are inclusive, contiguous, ordered, and must cover the full transcript range with no gaps.',
     '- The title must be a short working title naming the narrative beat, not just a number.',
-    '- The summary must describe the specific narrative content of the segment in one sentence - what actually happens, not a vague label. Example: "Curtis describes the 1992 baseball bat attack ordered by Gotti Sr. and checks himself out of the hospital the next morning to go back on air."',
+    '- The summary must describe the specific narrative content of the segment in one sentence - what actually happens, not a vague label. Example: "Boo explains how the fighter pilot debrief system maps directly onto daily leadership decisions and why most corporate development programs fail to change behavior."',
     '- If you cannot write a specific summary without vagueness or run-ons, treat that as a signal the segment lacks a clean narrative unit and revisit the cut points before returning output.'
   ].join('\n');
 
@@ -631,6 +672,8 @@ const requestAnthropicSplitPlan = async (
           warning: lastWarning
         };
       }
+
+      await sleep(Math.min(4_000, 750 * attempt));
     } finally {
       clearTimeout(timer);
     }
@@ -647,8 +690,64 @@ const requestAiSplitPlan = async (
   segments: Segment[],
   policy: DurationPolicy,
   settings: AppSettings,
-  fetchImpl: typeof fetch
-): Promise<AiPlanOutcome> => requestAnthropicSplitPlan(segments, policy, settings, fetchImpl);
+  fetchImpl: typeof fetch,
+  emitStatus?: (message: string) => void
+): Promise<HierarchicalAiPlanOutcome> => {
+  if ((settings.anthropicApiKey?.trim() ?? '').length === 0 || segments.length <= LONG_TRANSCRIPT_SEGMENT_THRESHOLD) {
+    const outcome = await requestAnthropicSplitPlan(segments, policy, settings, fetchImpl);
+    return { ...outcome, usedWindowing: false };
+  }
+
+  const windows = buildCoarseWindows(segments);
+  const stitchedRanges: ChunkRange[] = [];
+  const warnings: string[] = [];
+  let attempted = false;
+
+  emitStatus?.(`Large transcript detected. Planning ${windows.length} Claude window(s) first.`);
+
+  for (let index = 0; index < windows.length; index += 1) {
+    const windowRange = windows[index];
+    const windowSegments = segments.slice(windowRange.startIndex, windowRange.endIndex + 1);
+
+    emitStatus?.(`Planning window ${index + 1}/${windows.length} with ${windowSegments.length} segment unit(s).`);
+
+    const outcome = await requestAnthropicSplitPlan(windowSegments, policy, settings, fetchImpl);
+    attempted ||= outcome.attempted;
+
+    if (outcome.ranges && outcome.ranges.length > 0) {
+      for (const range of outcome.ranges) {
+        stitchedRanges.push({
+          startIndex: windowRange.startIndex + range.startIndex,
+          endIndex: windowRange.startIndex + range.endIndex,
+          title: range.title,
+          summary: range.summary
+        });
+      }
+      continue;
+    }
+
+    const fallbackRanges = deterministicSplit(windowSegments, policy).map((range) => ({
+      startIndex: windowRange.startIndex + range.startIndex,
+      endIndex: windowRange.startIndex + range.endIndex,
+      title: range.title,
+      summary: range.summary
+    }));
+    stitchedRanges.push(...fallbackRanges);
+
+    const windowStart = formatClockTimestamp(segments[windowRange.startIndex].start);
+    const windowEnd = formatClockTimestamp(segments[windowRange.endIndex].end);
+    const baseWarning = outcome.warning ?? 'Claude window planning failed.';
+    warnings.push(`${baseWarning} Used deterministic planning for window ${index + 1} (${windowStart} - ${windowEnd}).`);
+  }
+
+  const warning = warnings.length > 0 ? warnings.join(' | ') : undefined;
+  return {
+    ranges: stitchedRanges.length > 0 ? normalizeRanges(stitchedRanges, segments.length) : null,
+    attempted,
+    usedWindowing: true,
+    ...(warning ? { warning } : {})
+  };
+};
 
 const buildManifest = (
   transcript: NormalizedTranscript,
@@ -778,21 +877,36 @@ export const splitPodcastTranscripts = async (request: SplitRequest, options: Sp
       let mode: SplitMode = 'fallback';
       let ranges = deterministicSplit(transcript.segments, policy);
 
-      emitStatus(`Sending ${transcript.segments.length} segment unit(s) to Claude.`, {
+      emitStatus(`Preparing Claude plan for ${transcript.segments.length} segment unit(s).`, {
         sourcePath: transcript.sourcePath,
         fileName: transcript.fileName
       });
 
-      const aiOutcome = await requestAiSplitPlan(transcript.segments, policy, options.settings, fetchImpl);
+      const aiOutcome = await requestAiSplitPlan(
+        transcript.segments,
+        policy,
+        options.settings,
+        fetchImpl,
+        (message) =>
+          emitStatus(message, {
+            sourcePath: transcript.sourcePath,
+            fileName: transcript.fileName
+          })
+      );
       if (aiOutcome.ranges && aiOutcome.ranges.length > 0) {
         mode = 'ai';
         ranges = aiOutcome.ranges;
-        emitStatus(`Claude returned a split plan (${aiOutcome.ranges.length} range(s)).`, {
-          sourcePath: transcript.sourcePath,
-          fileName: transcript.fileName
-        });
+        emitStatus(
+          aiOutcome.usedWindowing
+            ? `Claude returned a stitched split plan (${aiOutcome.ranges.length} range(s)).`
+            : `Claude returned a split plan (${aiOutcome.ranges.length} range(s)).`,
+          {
+            sourcePath: transcript.sourcePath,
+            fileName: transcript.fileName
+          }
+        );
       } else {
-        emitStatus('No valid Claude plan returned. Using fallback splitter.', {
+        emitStatus('No valid Claude plan returned. Using deterministic structure only.', {
           sourcePath: transcript.sourcePath,
           fileName: transcript.fileName
         });
@@ -875,7 +989,9 @@ export const __testables = {
   enforceDurationPolicy,
   normalizeRanges,
   synthesizeSegmentsFromText,
-  getDurationPolicy
+  getDurationPolicy,
+  buildCoarseWindows,
+  requestAiSplitPlan
 };
 
 export const formatChunkTimeRange = (startSec: number, endSec: number): string => `${formatClockTimestamp(startSec)} - ${formatClockTimestamp(endSec)}`;
