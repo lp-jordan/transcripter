@@ -1,5 +1,6 @@
 # Ignore node modules and build files
 node_modules/
+runtime/
 dist/
 build/*
 !build/icons/
