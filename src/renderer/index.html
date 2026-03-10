@@ -15,11 +15,14 @@
 
     <main class="layout">
       <header class="app-header">
-        <h1>LeaderScript</h1>
+        <div>
+          <p class="eyebrow">Transcript Generator</p>
+          <h1>LeaderScript</h1>
+        </div>
         <div class="header-tools">
           <button
             id="tools-trigger"
-            class="button-tertiary"
+            class="button-tertiary button-icon"
             type="button"
             aria-haspopup="true"
             aria-expanded="false"
@@ -27,11 +30,12 @@
             aria-label="Open tools menu"
             title="Tools"
           >
-            ⋮
+            ...
           </button>
           <section id="tools-menu" class="tools-menu" hidden>
-            <button id="open-merge-transcripts" class="tools-menu-item" type="button">Merge Transcripts…</button>
-            <button id="open-build-project-bundle" class="tools-menu-item" type="button">Build Project Bundle…</button>
+            <button id="open-merge-transcripts" class="tools-menu-item button-secondary" type="button">Merge Transcripts...</button>
+            <button id="open-build-project-bundle" class="tools-menu-item button-secondary" type="button">Build Project Bundle...</button>
+            <button id="open-podcast-splitter" class="tools-menu-item button-secondary" type="button">Podcast Splitter...</button>
           </section>
         </div>
       </header>
@@ -39,11 +43,16 @@
       <dialog id="merge-transcripts-modal" class="modal">
         <form method="dialog" class="modal-shell">
           <div class="modal-header">
-            <h2>Merge Transcripts</h2>
-            <button id="close-merge-transcripts" type="button" class="button-tertiary">✕</button>
+            <div>
+              <p class="section-title">Utility</p>
+              <h2>Merge Transcripts</h2>
+            </div>
+            <button id="close-merge-transcripts" type="button" class="button-tertiary button-icon" aria-label="Close merge transcripts dialog">
+              X
+            </button>
           </div>
           <p class="modal-copy">Drop .txt files below. They will be merged in the listed order.</p>
-          <section id="merge-drop-zone" class="merge-drop-zone" aria-label="Merge transcript drop zone">
+          <section id="merge-drop-zone" class="drop-zone modal-drop-zone" aria-label="Merge transcript drop zone">
             <p>Drag and drop .txt files here</p>
           </section>
           <ul id="merge-file-list" class="merge-file-list"></ul>
@@ -53,11 +62,100 @@
         </form>
       </dialog>
 
-      <dialog id="build-project-bundle-modal" class="modal">
-        <form method="dialog" class="modal-shell bundle-modal-shell">
+      <dialog id="podcast-splitter-modal" class="modal">
+        <form method="dialog" class="modal-shell tool-modal-shell">
           <div class="modal-header">
-            <h2>Build Project Bundle</h2>
-            <button id="close-build-project-bundle" type="button" class="button-tertiary">✕</button>
+            <div>
+              <p class="section-title">Tool</p>
+              <h2>Podcast Splitter</h2>
+            </div>
+            <button id="close-podcast-splitter" type="button" class="button-tertiary button-icon" aria-label="Close podcast splitter dialog">X</button>
+          </div>
+          <div class="stack-md">
+            <p class="modal-copy modal-copy-strong">Add .txt or .job.json transcripts. Splits are topic-aware and tuned for spoken-word pacing.</p>
+            <p class="helper-inline">Hard bounds stay between 2 and 7 minutes. Soft targets below let you steer the splitter.</p>
+          </div>
+
+          <section class="tool-intake">
+            <div class="section-head">
+              <p class="section-title">Transcripts</p>
+            </div>
+            <div class="bundle-actions-row">
+              <button id="pick-podcast-splitter-files" class="button-secondary" type="button">Choose Transcript Files</button>
+            </div>
+            <section id="podcast-splitter-drop-zone" class="drop-zone modal-drop-zone modal-drop-zone-compact" aria-label="Podcast splitter file drop zone">
+              <p>Drag and drop .txt or .job.json files here</p>
+            </section>
+            <ul id="podcast-splitter-file-list" class="merge-file-list"></ul>
+          </section>
+
+          <section class="surface-block">
+            <div class="section-head">
+              <p class="section-title">Output Folder</p>
+            </div>
+            <div class="bundle-actions-row">
+              <button id="pick-podcast-splitter-output" class="button-secondary" type="button">Choose Output Folder</button>
+            </div>
+            <p id="podcast-splitter-output-display" class="status-copy actionable-empty">Choose where split transcripts should be written.</p>
+          </section>
+
+          <section class="surface-block">
+            <div class="section-head">
+              <p class="section-title">Target Duration</p>
+              <p class="section-note">Minutes per chunk</p>
+            </div>
+            <div class="bundle-actions-row bundle-actions-row-split">
+              <label class="modal-field" for="podcast-target-min">
+                <span>Soft Min</span>
+                <input id="podcast-target-min" type="number" min="1" max="10" step="0.5" value="3" />
+              </label>
+              <label class="modal-field" for="podcast-target-max">
+                <span>Soft Max</span>
+                <input id="podcast-target-max" type="number" min="1" max="15" step="0.5" value="6" />
+              </label>
+            </div>
+            <p class="helper-inline">The splitter uses these values as soft guidance and will still respect the hard bounds above.</p>
+          </section>
+
+          <div class="modal-actions modal-actions-primary">
+            <button id="run-podcast-splitter" class="button-primary" type="button">Run Splitter</button>
+          </div>
+
+          <section class="surface-block">
+            <div class="section-head">
+              <p class="section-title">Status</p>
+            </div>
+            <div id="podcast-splitter-status-bar" class="splitter-status-bar" role="status" aria-live="polite">
+              <span id="podcast-splitter-status-spinner" class="splitter-status-spinner" hidden></span>
+              <span id="podcast-splitter-status-text" class="splitter-status-text">Ready.</span>
+            </div>
+            <details id="podcast-splitter-status-details" class="splitter-status-details">
+              <summary>Show Activity Log</summary>
+              <ul id="podcast-splitter-status" class="merge-file-list"></ul>
+            </details>
+          </section>
+
+          <section class="surface-block">
+            <div class="section-head">
+              <p class="section-title">Results</p>
+            </div>
+            <p id="podcast-splitter-warning" class="status-copy" hidden></p>
+            <p id="podcast-splitter-results-empty" class="empty-state-copy">Completed split files and any fallbacks will appear here after a run.</p>
+            <ul id="podcast-splitter-results" class="merge-file-list"></ul>
+          </section>
+        </form>
+      </dialog>
+
+      <dialog id="build-project-bundle-modal" class="modal">
+        <form method="dialog" class="modal-shell tool-modal-shell">
+          <div class="modal-header">
+            <div>
+              <p class="section-title">Tool</p>
+              <h2>Build Project Bundle</h2>
+            </div>
+            <button id="close-build-project-bundle" type="button" class="button-tertiary button-icon" aria-label="Close build project bundle dialog">
+              X
+            </button>
           </div>
 
           <label class="modal-field" for="bundle-project-name">
@@ -65,134 +163,199 @@
             <input id="bundle-project-name" type="text" placeholder="Enter project name" />
           </label>
 
-          <section class="bundle-input-section">
-            <p class="modal-copy">Input Selectors</p>
+          <section class="surface-block">
+            <div class="section-head">
+              <p class="section-title">Input Selectors</p>
+            </div>
             <div class="bundle-actions-row">
-              <button id="pick-bundle-jobs-folder" class="button-secondary" type="button">Choose Jobs Folder</button>
+              <button id="pick-bundle-jobs-folder" class="button-primary button-primary-subtle" type="button">Choose Jobs Folder</button>
               <button id="pick-bundle-job-files" class="button-secondary" type="button">Add .json Files</button>
             </div>
-            <p id="bundle-jobs-folder-display" class="modal-muted">No jobs folder selected.</p>
-            <section id="bundle-job-drop-zone" class="merge-drop-zone bundle-drop-zone" aria-label="Bundle job file drop zone">
+            <p id="bundle-jobs-folder-display" class="status-copy actionable-empty">Choose a jobs folder or add individual .job.json files.</p>
+            <section id="bundle-job-drop-zone" class="drop-zone modal-drop-zone" aria-label="Bundle job file drop zone">
               <p>Drag and drop .job.json files here</p>
             </section>
             <ul id="bundle-job-file-list" class="merge-file-list"></ul>
           </section>
 
-          <section class="bundle-output-section">
-            <p class="modal-copy">Output Folder</p>
+          <section class="surface-block">
+            <div class="section-head">
+              <p class="section-title">Output Folder</p>
+            </div>
             <div class="bundle-actions-row">
               <button id="pick-bundle-output-folder" class="button-secondary" type="button">Choose Output Folder</button>
             </div>
-            <p id="bundle-output-folder-display" class="modal-muted">No output folder selected.</p>
+            <p id="bundle-output-folder-display" class="status-copy actionable-empty">Choose where the finished project bundle should be created.</p>
           </section>
 
-          <div class="modal-actions bundle-modal-actions">
+          <div class="modal-actions modal-actions-primary">
             <button id="build-project-bundle" class="button-primary" type="button">Build Bundle</button>
           </div>
         </form>
       </dialog>
 
-      <section id="drop-zone" class="drop-zone" role="button" tabindex="0" aria-label="Add files to queue">
-        <p>Drag and drop files here, or click to add files to the queue.</p>
+      <section class="queue-flow">
+        <section id="drop-zone" class="drop-zone queue-drop-zone" role="button" tabindex="0" aria-label="Add files to queue">
+          <p>Drag and drop files here, or click to add files to the queue.</p>
+        </section>
+
+        <section class="panel panel-queue">
+          <div class="section-head">
+            <p class="section-title">Queue</p>
+          </div>
+
+          <div class="controls">
+            <div class="controls-left control-group">
+              <button id="add-files" class="button-secondary" type="button">Add Files</button>
+              <button id="remove-selected" class="button-secondary" type="button">Remove Selected</button>
+              <button id="reset-selected" class="button-secondary" type="button">Reset Selected</button>
+              <button id="change-output-selected" class="button-secondary" type="button">Change Output Location</button>
+            </div>
+            <div class="controls-divider" aria-hidden="true"></div>
+            <div class="controls-right control-group">
+              <button id="queue-primary" class="button-primary" type="button">Start</button>
+              <button id="pause-toggle" class="button-secondary button-icon" type="button" aria-label="Pause queue">||</button>
+              <button id="stop-current" class="button-secondary button-icon button-stop" type="button" aria-label="Stop current job">[]</button>
+            </div>
+            <div class="controls-tertiary">
+              <button
+                id="settings-trigger"
+                class="button-tertiary button-icon"
+                type="button"
+                aria-haspopup="dialog"
+                aria-expanded="false"
+                aria-controls="settings-menu"
+                aria-label="Open settings"
+                title="Settings"
+              >
+                &#9881;
+              </button>
+              <section id="settings-menu" class="settings-menu" hidden>
+                <div class="settings-scrim"></div>
+                <form id="settings-form" class="settings-modal-card" novalidate>
+                  <div class="settings-header">
+                    <button id="settings-back" class="settings-back" type="button" aria-label="Close settings">Back</button>
+                    <div>
+                      <p class="section-title">Overlay</p>
+                      <h2>Settings</h2>
+                    </div>
+                  </div>
+
+                  <section class="settings-surface">
+                    <label class="settings-field">
+                      <span>Output</span>
+                      <div class="output-directory-control">
+                        <input id="output-directory" name="outputDirectory" type="text" readonly />
+                        <button id="pick-output-directory" class="button-secondary" type="button">Choose Folder</button>
+                      </div>
+                    </label>
+                    <label class="settings-field">
+                      <span>Model</span>
+                      <select id="model" name="model">
+                        <option value="tiny">tiny</option>
+                        <option value="base">base</option>
+                        <option value="small">small</option>
+                      </select>
+                    </label>
+                    <label class="settings-field">
+                      <span>Language</span>
+                      <select id="language" name="language">
+                        <option value="en">English (en)</option>
+                        <option value="es">Spanish (es)</option>
+                        <option value="fr">French (fr)</option>
+                        <option value="de">German (de)</option>
+                        <option value="it">Italian (it)</option>
+                        <option value="pt">Portuguese (pt)</option>
+                        <option value="auto">Auto detect</option>
+                      </select>
+                    </label>
+                    <div class="settings-check-group">
+                      <label class="settings-check">
+                        <input id="write-run-log" name="writeRunLog" type="checkbox" />
+                        Produce Log After Run
+                      </label>
+                      <label class="settings-check">
+                        <input id="ingest-enabled" name="ingestEnabled" type="checkbox" />
+                        Ingest Exports
+                      </label>
+                    </div>
+                    <section id="ingest-watch-folder-panel" class="ingest-watch-folder-panel" aria-hidden="true">
+                      <label class="settings-field" for="ingest-watch-directory">
+                        <span>Watch Folder</span>
+                        <div class="output-directory-control">
+                          <input id="ingest-watch-directory" name="ingestWatchDirectory" type="text" readonly />
+                          <button id="pick-ingest-watch-directory" class="button-secondary" type="button">Choose Folder</button>
+                        </div>
+                      </label>
+                    </section>
+                    <fieldset class="settings-checkboxes">
+                      <legend>File Types</legend>
+                      <label class="settings-check compact"><input id="format-txt" name="txt" type="checkbox" />TXT</label>
+                      <label class="settings-check compact"><input id="format-timecoded-txt" name="timecodedTxt" type="checkbox" />Timecoded TXT</label>
+                      <label class="settings-check compact"><input id="format-srt" name="srt" type="checkbox" />SRT</label>
+                      <label class="settings-check compact"><input id="format-vtt" name="vtt" type="checkbox" />VTT</label>
+                    </fieldset>
+                  </section>
+
+                  <section class="settings-surface settings-subsection">
+                    <div class="settings-subsection-header">
+                      <p class="section-title">AI Configuration</p>
+                      <p class="section-note">Podcast Splitter AI (Claude)</p>
+                    </div>
+                    <label class="settings-field" for="anthropic-api-key">
+                      <span>Anthropic API Key</span>
+                      <div class="password-field">
+                        <input id="anthropic-api-key" name="anthropicApiKey" type="password" placeholder="sk-ant-..." autocomplete="off" />
+                        <button id="toggle-anthropic-api-key" class="button-secondary" type="button" aria-pressed="false">Show</button>
+                      </div>
+                    </label>
+                    <label class="settings-field" for="anthropic-model">
+                      <span>Anthropic Model</span>
+                      <input id="anthropic-model" name="anthropicModel" type="text" placeholder="claude-haiku-4-5-20251001" />
+                    </label>
+                    <label class="settings-field" for="openai-timeout-ms">
+                      <span>AI Timeout (ms)</span>
+                      <input id="openai-timeout-ms" name="openaiTimeoutMs" type="number" min="3000" max="120000" step="1000" />
+                    </label>
+                    <label class="settings-field" for="openai-max-retries">
+                      <span>AI Max Retries</span>
+                      <input id="openai-max-retries" name="openaiMaxRetries" type="number" min="0" max="4" step="1" />
+                    </label>
+                  </section>
+                </form>
+              </section>
+            </div>
+          </div>
+
+          <section class="queue-window" aria-label="Queue window">
+            <label class="queue-select-all" for="select-all-queued-clips">
+              <input id="select-all-queued-clips" type="checkbox" />
+              <span id="select-all-label">Select All</span>
+            </label>
+            <p id="queue-empty-message" class="queue-empty-message empty-state-copy" hidden>No files in queue yet. Add audio to begin a run.</p>
+            <ul id="queue-list"></ul>
+            <div class="queue-footer" aria-live="polite">
+              <small id="queue-job-counter">Job 0 / 0</small>
+              <small id="queue-elapsed-counter">Elapsed --:--</small>
+            </div>
+            <div class="queue-actions-row">
+              <button id="archive-completed" class="button-secondary button-secondary-quiet queue-archive-action" type="button">
+                Move Completed to Archive
+              </button>
+            </div>
+          </section>
+        </section>
       </section>
 
-      <section class="panel">
-        <p class="section-title">Queue</p>
-        <div class="controls">
-          <div class="controls-left">
-            <button id="add-files" class="button-secondary" type="button">Add Files</button>
-            <button id="remove-selected" class="button-secondary" type="button">Remove Selected</button>
-            <button id="reset-selected" class="button-secondary" type="button">Reset Selected</button>
-          </div>
-          <div class="controls-right">
-            <button id="queue-primary" class="button-primary" type="button">Start</button>
-            <button id="pause-toggle" class="button-icon" type="button" aria-label="Pause queue">⏯</button>
-            <button id="stop-current" class="button-icon button-stop" type="button" aria-label="Stop current job">⏹</button>
-          </div>
-          <div class="controls-tertiary">
-            <button
-              id="settings-trigger"
-              class="button-tertiary"
-              type="button"
-              aria-haspopup="true"
-              aria-expanded="false"
-              aria-controls="settings-menu"
-              aria-label="Open settings"
-              title="Settings"
-            >
-              ⚙
-            </button>
-            <section id="settings-menu" class="settings-menu" hidden>
-              <form id="settings-form" novalidate>
-                <button id="settings-back" class="settings-back" type="button" aria-label="Close settings">← Back</button>
-                <label class="settings-field">
-                  <span>Output</span>
-                  <div class="output-directory-control">
-                    <input id="output-directory" name="outputDirectory" type="text" readonly />
-                    <button id="pick-output-directory" type="button">Choose Folder</button>
-                  </div>
-                </label>
-                <label class="settings-field">
-                  <span>Model</span>
-                  <select id="model" name="model">
-                    <option value="tiny">tiny</option>
-                    <option value="base">base</option>
-                    <option value="small">small</option>
-                  </select>
-                </label>
-                <label class="settings-field">
-                  <span>Language</span>
-                  <select id="language" name="language">
-                    <option value="en">English (en)</option>
-                    <option value="es">Spanish (es)</option>
-                    <option value="fr">French (fr)</option>
-                    <option value="de">German (de)</option>
-                    <option value="it">Italian (it)</option>
-                    <option value="pt">Portuguese (pt)</option>
-                    <option value="auto">Auto detect</option>
-                  </select>
-                </label>
-                <label class="settings-check">
-                  <input id="write-run-log" name="writeRunLog" type="checkbox" />
-                  Produce Log After Run
-                </label>
-                <fieldset class="settings-checkboxes">
-                  <legend>File Types</legend>
-                  <label class="settings-check compact"><input id="format-txt" name="txt" type="checkbox" />TXT</label>
-                  <label class="settings-check compact"
-                    ><input id="format-timecoded-txt" name="timecodedTxt" type="checkbox" />Timecoded TXT</label
-                  >
-                  <label class="settings-check compact"><input id="format-srt" name="srt" type="checkbox" />SRT</label>
-                  <label class="settings-check compact"><input id="format-vtt" name="vtt" type="checkbox" />VRT</label>
-                </fieldset>
-              </form>
-            </section>
-          </div>
-        </div>
-
-        <section class="queue-window" aria-label="Queue window">
-          <p id="queue-empty-message" class="queue-empty-message" hidden>No Files in Queue</p>
-          <label class="queue-select-all" for="select-all-queued-clips">
-            <input id="select-all-queued-clips" type="checkbox" />
-            <span id="select-all-label">Select All</span>
-          </label>
-          <ul id="queue-list"></ul>
-          <div class="queue-footer" aria-live="polite">
-            <small id="queue-job-counter">Job 0 / 0</small>
-            <small id="queue-elapsed-counter">Elapsed 00:00</small>
-          </div>
-          <button id="archive-completed" class="button-secondary clear-completed" type="button">Archive Completed</button>
-        </section>
-
-
-        <section class="archive-window" aria-label="Archive window">
-          <div class="archive-header">
+      <section class="archive-window" aria-label="Archive window">
+        <div class="archive-header">
+          <div class="section-head">
             <p class="section-title">Archive</p>
-            <button id="clear-archive" class="button-danger" type="button">Clear Archive</button>
           </div>
-          <p id="archive-empty-message" class="archive-empty-message">No archived batches yet.</p>
-          <ul id="archive-list" class="archive-list"></ul>
-        </section>
+          <button id="clear-archive" class="button-danger" type="button">Clear Archive</button>
+        </div>
+        <p id="archive-empty-message" class="archive-empty-message" hidden></p>
+        <ul id="archive-list" class="archive-list"></ul>
       </section>
     </main>
 

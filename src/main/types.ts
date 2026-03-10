@@ -87,11 +87,21 @@ export type WorkerOutboundMessage =
 
 export type AppSettings = {
   outputDirectory: string;
+  podcastSplitterOutputFolder?: string;
   language: string;
   model: WhisperModel;
   outputOptions: OutputOptions;
   overwritePolicy?: OverwritePolicy;
   writeRunLog?: boolean;
+  ingestEnabled?: boolean;
+  ingestWatchDirectory?: string;
+  aiProvider?: 'openai' | 'anthropic';
+  openaiApiKey?: string;
+  openaiModel?: string;
+  anthropicApiKey?: string;
+  anthropicModel?: string;
+  openaiTimeoutMs?: number;
+  openaiMaxRetries?: number;
 };
 
 export type LogLevel = 'info' | 'error';
@@ -103,6 +113,79 @@ export type AppLogEntry = {
   message: string;
   jobId?: string;
   filePath?: string;
+};
+
+export type SplitRequest = {
+  sourcePaths: string[];
+  outputFolderPath: string;
+  targetMinMinutes?: number;
+  targetMaxMinutes?: number;
+};
+
+export type SplitChunk = {
+  index: number;
+  title: string;
+  summary: string;
+  startSec: number;
+  endSec: number;
+  durationSec: number;
+  textFile: string;
+  charCount: number;
+};
+
+export type SplitManifest = {
+  source: {
+    fileName: string;
+    sourcePath: string;
+  };
+  generationMode: 'ai' | 'fallback';
+  splitMethod: 'ai:anthropic' | 'fallback';
+  ai: {
+    provider: 'anthropic';
+    attempted: boolean;
+    warning?: string;
+  };
+  durationPolicy: {
+    softMinSec: number;
+    softMaxSec: number;
+    hardMinSec: number;
+    hardMaxSec: number;
+  };
+  chunks: SplitChunk[];
+};
+
+export type SplitFailure = {
+  sourcePath: string;
+  error: string;
+};
+
+export type SplitSuccess = {
+  sourcePath: string;
+  outputFolderPath: string;
+  manifestPath: string;
+  chunkCount: number;
+  generationMode: 'ai' | 'fallback';
+  splitMethod: 'ai:anthropic' | 'fallback';
+  aiAttempted: boolean;
+  aiWarning?: string;
+};
+
+export type SplitResult = {
+  outputFolderPath: string;
+  reportPath: string;
+  successes: SplitSuccess[];
+  failures: SplitFailure[];
+  warnings: string[];
+};
+
+export type PodcastSplitterStatus = {
+  timestamp: string;
+  runId: string;
+  message: string;
+  sourcePath?: string;
+  fileName?: string;
+  attempt?: number;
+  maxAttempts?: number;
 };
 
 export type ProjectBundleInput = {
@@ -154,3 +237,9 @@ export type ProjectBundleResponse<T> =
         | 'WRITE_FAILED';
       data?: ProjectBundleValidationSummary;
     };
+
+
+
+
+
+

@@ -1,5 +1,5 @@
 import './style.css';
-import type { ArchiveBatch, ProjectBundleInput, ProjectBundleValidationSummary } from '../main/types';
+import type { ArchiveBatch, PodcastSplitterStatus, ProjectBundleInput, ProjectBundleValidationSummary } from '../main/types';
 import type { QueueState } from '../preload/preload';
 import type { AppLogEntry } from '../main/types';
 
@@ -12,15 +12,25 @@ const pickOutputDirectoryButton = document.getElementById('pick-output-directory
 const modelSelect = document.getElementById('model') as HTMLSelectElement;
 const languageSelect = document.getElementById('language') as HTMLSelectElement;
 const writeRunLogCheckbox = document.getElementById('write-run-log') as HTMLInputElement;
+const ingestEnabledCheckbox = document.getElementById('ingest-enabled') as HTMLInputElement;
+const ingestWatchFolderPanel = document.getElementById('ingest-watch-folder-panel') as HTMLElement;
+const ingestWatchDirectoryInput = document.getElementById('ingest-watch-directory') as HTMLInputElement;
+const pickIngestWatchDirectoryButton = document.getElementById('pick-ingest-watch-directory') as HTMLButtonElement;
 const txtOutputCheckbox = document.getElementById('format-txt') as HTMLInputElement;
 const timecodedTxtOutputCheckbox = document.getElementById('format-timecoded-txt') as HTMLInputElement;
 const srtOutputCheckbox = document.getElementById('format-srt') as HTMLInputElement;
 const vttOutputCheckbox = document.getElementById('format-vtt') as HTMLInputElement;
+const anthropicApiKeyInput = document.getElementById('anthropic-api-key') as HTMLInputElement;
+const anthropicModelInput = document.getElementById('anthropic-model') as HTMLInputElement;
+const toggleAnthropicApiKeyButton = document.getElementById('toggle-anthropic-api-key') as HTMLButtonElement;
+const openaiTimeoutInput = document.getElementById('openai-timeout-ms') as HTMLInputElement;
+const openaiMaxRetriesInput = document.getElementById('openai-max-retries') as HTMLInputElement;
 
 
 const addFilesButton = document.getElementById('add-files') as HTMLButtonElement;
 const removeSelectedButton = document.getElementById('remove-selected') as HTMLButtonElement;
 const resetSelectedButton = document.getElementById('reset-selected') as HTMLButtonElement;
+const changeOutputSelectedButton = document.getElementById('change-output-selected') as HTMLButtonElement;
 const archiveCompletedButton = document.getElementById('archive-completed') as HTMLButtonElement;
 const clearArchiveButton = document.getElementById('clear-archive') as HTMLButtonElement;
 const selectAllQueuedClipsCheckbox = document.getElementById('select-all-queued-clips') as HTMLInputElement;
@@ -35,6 +45,7 @@ const toolsTriggerButton = document.getElementById('tools-trigger') as HTMLButto
 const toolsMenu = document.getElementById('tools-menu') as HTMLElement;
 const openMergeTranscriptsButton = document.getElementById('open-merge-transcripts') as HTMLButtonElement;
 const openBuildProjectBundleButton = document.getElementById('open-build-project-bundle') as HTMLButtonElement;
+const openPodcastSplitterButton = document.getElementById('open-podcast-splitter') as HTMLButtonElement;
 const mergeTranscriptsModal = document.getElementById('merge-transcripts-modal') as HTMLDialogElement;
 const closeMergeTranscriptsButton = document.getElementById('close-merge-transcripts') as HTMLButtonElement;
 const mergeDropZone = document.getElementById('merge-drop-zone') as HTMLDivElement;
@@ -51,6 +62,24 @@ const bundleJobFileList = document.getElementById('bundle-job-file-list') as HTM
 const pickBundleOutputFolderButton = document.getElementById('pick-bundle-output-folder') as HTMLButtonElement;
 const bundleOutputFolderDisplay = document.getElementById('bundle-output-folder-display') as HTMLParagraphElement;
 const buildProjectBundleButton = document.getElementById('build-project-bundle') as HTMLButtonElement;
+const podcastSplitterModal = document.getElementById('podcast-splitter-modal') as HTMLDialogElement;
+const closePodcastSplitterButton = document.getElementById('close-podcast-splitter') as HTMLButtonElement;
+const pickPodcastSplitterFilesButton = document.getElementById('pick-podcast-splitter-files') as HTMLButtonElement;
+const podcastSplitterDropZone = document.getElementById('podcast-splitter-drop-zone') as HTMLDivElement;
+const podcastSplitterFileList = document.getElementById('podcast-splitter-file-list') as HTMLUListElement;
+const pickPodcastSplitterOutputButton = document.getElementById('pick-podcast-splitter-output') as HTMLButtonElement;
+const podcastSplitterOutputDisplay = document.getElementById('podcast-splitter-output-display') as HTMLParagraphElement;
+const podcastTargetMinInput = document.getElementById('podcast-target-min') as HTMLInputElement;
+const podcastTargetMaxInput = document.getElementById('podcast-target-max') as HTMLInputElement;
+const runPodcastSplitterButton = document.getElementById('run-podcast-splitter') as HTMLButtonElement;
+const podcastSplitterResults = document.getElementById('podcast-splitter-results') as HTMLUListElement;
+const podcastSplitterStatusBar = document.getElementById('podcast-splitter-status-bar') as HTMLDivElement;
+const podcastSplitterStatusSpinner = document.getElementById('podcast-splitter-status-spinner') as HTMLSpanElement;
+const podcastSplitterStatusText = document.getElementById('podcast-splitter-status-text') as HTMLSpanElement;
+const podcastSplitterStatusDetails = document.getElementById('podcast-splitter-status-details') as HTMLDetailsElement;
+const podcastSplitterStatusList = document.getElementById('podcast-splitter-status') as HTMLUListElement;
+const podcastSplitterWarning = document.getElementById('podcast-splitter-warning') as HTMLParagraphElement;
+const podcastSplitterResultsEmpty = document.getElementById('podcast-splitter-results-empty') as HTMLParagraphElement;
 const toggleConsoleButton = document.getElementById('toggle-console') as HTMLButtonElement;
 const consolePanel = document.getElementById('console-panel') as HTMLElement;
 const consoleOutput = document.getElementById('console-output') as HTMLPreElement;
@@ -73,11 +102,28 @@ let mergeTranscriptPaths: string[] = [];
 let bundleJobFolderPath = '';
 let bundleJobFilePaths: string[] = [];
 let bundleOutputFolderPath = '';
+let podcastSplitterSourcePaths: string[] = [];
+let podcastSplitterOutputFolderPath = '';
+const podcastSplitterStatusBuffer: string[] = [];
+let podcastSplitterStatusPumpTimer: number | null = null;
 const appLogs: AppLogEntry[] = [];
 const MAX_CONSOLE_LINES = 200;
 let activeJobStartedAt = 0;
 let activeJobElapsedMs = 0;
 let activeJobTimer: number | null = null;
+let isAnthropicApiKeyVisible = false;
+
+type QueueProgressRef = {
+  statusLabel: HTMLElement;
+  progressFill: HTMLSpanElement;
+};
+
+const queueProgressRefs = new Map<string, QueueProgressRef>();
+const queueDisplayedProgress = new Map<string, number>();
+const queueTargetProgress = new Map<string, number>();
+const queueStatusCache = new Map<string, QueueState['items'][number]['status']>();
+const queueTranscribingStartedAt = new Map<string, number>();
+let queueProgressAnimationFrame: number | null = null;
 
 const formatElapsedTime = (elapsedMs: number): string => {
   const totalSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
@@ -209,11 +255,149 @@ const appendMergeTranscriptPaths = (paths: string[]) => {
   renderMergeTranscriptList();
 };
 
+const isPodcastSplitterFile = (candidatePath: string): boolean => {
+  const lower = candidatePath.toLowerCase();
+  return lower.endsWith('.txt') || lower.endsWith('.job.json');
+};
+
+const appendPodcastSplitterPaths = (paths: string[]) => {
+  const filtered = paths.filter((candidatePath) => isPodcastSplitterFile(candidatePath));
+  podcastSplitterSourcePaths = [...new Set([...podcastSplitterSourcePaths, ...filtered])];
+  renderPodcastSplitterFileList();
+};
+
+const renderPodcastSplitterFileList = () => {
+  podcastSplitterFileList.innerHTML = '';
+
+  podcastSplitterSourcePaths.forEach((sourcePath) => {
+    const item = document.createElement('li');
+    item.textContent = getFileName(sourcePath);
+    item.title = sourcePath;
+    podcastSplitterFileList.append(item);
+  });
+
+  runPodcastSplitterButton.disabled =
+    podcastSplitterSourcePaths.length === 0 || podcastSplitterOutputFolderPath.trim().length === 0;
+};
+
+const renderPodcastSplitterOutput = () => {
+  const hasOutputFolder = podcastSplitterOutputFolderPath.trim().length > 0;
+  podcastSplitterOutputDisplay.textContent = hasOutputFolder
+    ? podcastSplitterOutputFolderPath
+    : 'Choose where split transcripts should be written.';
+  podcastSplitterOutputDisplay.classList.toggle('actionable-empty', !hasOutputFolder);
+  renderPodcastSplitterFileList();
+};
+
+const resetPodcastSplitterUi = () => {
+  podcastSplitterSourcePaths = [];
+  podcastTargetMinInput.value = '3';
+  podcastTargetMaxInput.value = '6';
+  podcastSplitterResults.innerHTML = '';
+  podcastSplitterStatusList.innerHTML = '';
+  podcastSplitterStatusBuffer.splice(0, podcastSplitterStatusBuffer.length);
+  stopPodcastSplitterStatusPump();
+  podcastSplitterStatusDetails.open = false;
+  setPodcastSplitterStatusBar('Ready.', false);
+  podcastSplitterWarning.hidden = true;
+  podcastSplitterWarning.textContent = '';
+  podcastSplitterResultsEmpty.hidden = false;
+  renderPodcastSplitterOutput();
+};
+
+const setPodcastSplitterStatusBar = (message: string, busy = false) => {
+  podcastSplitterStatusText.textContent = message;
+  podcastSplitterStatusSpinner.hidden = !busy;
+  podcastSplitterStatusBar.setAttribute('data-busy', String(busy));
+};
+
+const isAiWorkingMessage = (message: string): boolean => {
+  const normalized = message.toLowerCase();
+  return normalized.includes('claude') && (normalized.includes('sending') || normalized.includes('preparing'));
+};
+
+const appendPodcastSplitterStatusLine = (line: string) => {
+  const item = document.createElement('li');
+  item.textContent = line;
+  podcastSplitterStatusList.append(item);
+  while (podcastSplitterStatusList.children.length > 14) {
+    podcastSplitterStatusList.removeChild(podcastSplitterStatusList.firstElementChild as Node);
+  }
+};
+
+const formatPodcastSplitterStatus = (status: PodcastSplitterStatus): string => {
+  const time = new Date(status.timestamp).toLocaleTimeString();
+  const fileLabel = status.fileName ?? (status.sourcePath ? getFileName(status.sourcePath) : 'run');
+  const attemptLabel =
+    typeof status.attempt === 'number' && typeof status.maxAttempts === 'number'
+      ? ` [attempt ${status.attempt}/${status.maxAttempts}]`
+      : '';
+  return `[${time}] ${fileLabel}${attemptLabel}: ${status.message}`;
+};
+
+const startPodcastSplitterStatusPump = () => {
+  if (podcastSplitterStatusPumpTimer !== null) {
+    window.clearInterval(podcastSplitterStatusPumpTimer);
+    podcastSplitterStatusPumpTimer = null;
+  }
+
+  podcastSplitterStatusPumpTimer = window.setInterval(() => {
+    if (podcastSplitterStatusBuffer.length === 0) {
+      return;
+    }
+
+    const nextLine = podcastSplitterStatusBuffer.shift();
+    if (!nextLine) {
+      return;
+    }
+
+    appendPodcastSplitterStatusLine(nextLine);
+  }, 250);
+};
+
+const stopPodcastSplitterStatusPump = () => {
+  if (podcastSplitterStatusPumpTimer !== null) {
+    window.clearInterval(podcastSplitterStatusPumpTimer);
+    podcastSplitterStatusPumpTimer = null;
+  }
+};
+
+const renderPodcastSplitterResults = (
+  result: NonNullable<Awaited<ReturnType<typeof window.transcripter.podcastSplitter.split>>['data']>
+) => {
+  podcastSplitterResults.innerHTML = '';
+  podcastSplitterResultsEmpty.hidden = result.successes.length > 0 || result.failures.length > 0;
+
+  if (result.warnings.length > 0) {
+    podcastSplitterWarning.hidden = false;
+    podcastSplitterWarning.textContent = `Warnings: ${result.warnings.join(' | ')}`;
+  } else {
+    podcastSplitterWarning.hidden = true;
+    podcastSplitterWarning.textContent = '';
+  }
+
+  result.successes.forEach((entry) => {
+    const item = document.createElement('li');
+    const aiDetail = entry.aiAttempted
+      ? entry.generationMode === 'ai'
+        ? 'AI used (Claude)'
+        : `Fallback used (${entry.aiWarning ?? 'no AI output returned'})`
+      : `Fallback used (${entry.aiWarning ?? 'Claude key missing or AI disabled'})`;
+    item.textContent = `${getFileName(entry.sourcePath)} -> ${entry.chunkCount} chunk(s), ${aiDetail}`;
+    item.title = entry.manifestPath;
+    podcastSplitterResults.append(item);
+  });
+
+  result.failures.forEach((entry) => {
+    const item = document.createElement('li');
+    item.textContent = `${getFileName(entry.sourcePath)} -> ERROR: ${entry.error}`;
+    podcastSplitterResults.append(item);
+  });
+};
 const appendBundleJobPaths = (paths: string[]) => {
   const filtered = paths.filter((candidatePath) => candidatePath.toLowerCase().endsWith('.job.json'));
   bundleJobFilePaths = [...new Set([...bundleJobFilePaths, ...filtered])];
 };
-
 const appendBundleJobPathsFromFolder = async (folderPath: string) => {
   const paths = await window.transcripter.projectBundle.listJobJsonFilesInFolder(folderPath);
   appendBundleJobPaths(paths);
@@ -258,8 +442,16 @@ const refreshBundleOverwriteState = async () => {
 };
 
 const renderBundleUi = async () => {
-  bundleJobsFolderDisplay.textContent = bundleJobFolderPath.length > 0 ? bundleJobFolderPath : 'No jobs folder selected.';
-  bundleOutputFolderDisplay.textContent = bundleOutputFolderPath.length > 0 ? bundleOutputFolderPath : 'No output folder selected.';
+  const hasJobsFolder = bundleJobFolderPath.length > 0;
+  const hasOutputFolder = bundleOutputFolderPath.length > 0;
+  bundleJobsFolderDisplay.textContent = hasJobsFolder
+    ? bundleJobFolderPath
+    : 'Choose a jobs folder or add individual .job.json files.';
+  bundleOutputFolderDisplay.textContent = hasOutputFolder
+    ? bundleOutputFolderPath
+    : 'Choose where the finished project bundle should be created.';
+  bundleJobsFolderDisplay.classList.toggle('actionable-empty', !hasJobsFolder);
+  bundleOutputFolderDisplay.classList.toggle('actionable-empty', !hasOutputFolder);
   renderBundleFileList();
   await refreshBundleOverwriteState();
 };
@@ -277,15 +469,17 @@ const updateButtons = () => {
   const canProcessQueue = queueState.hasRunningJob || hasPendingItems;
   const selectableQueueItems = queueState.items.filter((item) => item.id !== queueState.activeJobId);
   const selectedQueueItems = selectableQueueItems.filter((item) => selectedIds.has(item.id));
+  const selectedIncompleteQueueItems = selectedQueueItems.filter((item) => item.status !== 'done');
   const allSelectableQueueItemsAreSelected = selectableQueueItems.length > 0 && selectedQueueItems.length === selectableQueueItems.length;
 
   removeSelectedButton.disabled = selectedQueueItems.length === 0 || queueState.hasRunningJob;
   resetSelectedButton.disabled = selectedQueueItems.length === 0 || queueState.hasRunningJob;
+  changeOutputSelectedButton.disabled = selectedIncompleteQueueItems.length === 0 || queueState.hasRunningJob;
   archiveCompletedButton.disabled = queueState.items.every((item) => !['done', 'failed', 'canceled'].includes(item.status));
   clearArchiveButton.disabled = queueState.archiveBatches.length === 0;
   stopCurrentButton.disabled = !queueState.hasRunningJob;
   pauseToggleButton.disabled = !queueState.hasRunningJob;
-  pauseToggleButton.textContent = queueState.isPaused ? '▶' : '⏸';
+  pauseToggleButton.textContent = queueState.isPaused ? '>' : '||';
   pauseToggleButton.setAttribute('aria-label', queueState.isPaused ? 'Resume queue' : 'Pause queue');
 
   selectAllQueuedClipsCheckbox.disabled = selectableQueueItems.length === 0;
@@ -298,9 +492,16 @@ const updateButtons = () => {
   queuePrimaryButton.textContent = 'Start';
 };
 
+const syncAnthropicApiKeyVisibility = () => {
+  anthropicApiKeyInput.type = isAnthropicApiKeyVisible ? 'text' : 'password';
+  toggleAnthropicApiKeyButton.textContent = isAnthropicApiKeyVisible ? 'Hide' : 'Show';
+  toggleAnthropicApiKeyButton.setAttribute('aria-pressed', String(isAnthropicApiKeyVisible));
+};
+
 const setSettingsMenuOpen = (isOpen: boolean) => {
   settingsMenu.hidden = !isOpen;
   settingsTriggerButton.setAttribute('aria-expanded', String(isOpen));
+  requestWindowFitToContent();
 };
 
 const formatLogEntry = (entry: AppLogEntry): string => {
@@ -364,6 +565,108 @@ const getStatusClassName = (status: QueueState['items'][number]['status']): stri
   }
 
   return 'status-processing';
+};
+
+const clampQueueProgress = (value: number): number => Math.max(0, Math.min(100, value));
+
+const syncQueueProgressState = () => {
+  const activeIds = new Set(queueState.items.map((item) => item.id));
+
+  queueDisplayedProgress.forEach((_, id) => {
+    if (!activeIds.has(id)) {
+      queueDisplayedProgress.delete(id);
+      queueTargetProgress.delete(id);
+      queueStatusCache.delete(id);
+      queueTranscribingStartedAt.delete(id);
+      queueProgressRefs.delete(id);
+    }
+  });
+
+  queueState.items.forEach((item) => {
+    const previousStatus = queueStatusCache.get(item.id);
+    if (previousStatus !== item.status) {
+      if (item.status === 'transcribing') {
+        queueTranscribingStartedAt.set(item.id, Date.now());
+      } else {
+        queueTranscribingStartedAt.delete(item.id);
+      }
+    }
+
+    queueStatusCache.set(item.id, item.status);
+    queueTargetProgress.set(item.id, clampQueueProgress(item.progress));
+
+    if (!queueDisplayedProgress.has(item.id) || item.status === 'pending') {
+      queueDisplayedProgress.set(item.id, clampQueueProgress(item.progress));
+    }
+  });
+};
+
+const getVisualQueueProgressTarget = (item: QueueState['items'][number], now = Date.now()): number => {
+  const actualProgress = queueTargetProgress.get(item.id) ?? clampQueueProgress(item.progress);
+
+  if (item.status === 'transcribing') {
+    const startedAt = queueTranscribingStartedAt.get(item.id) ?? now;
+    const elapsedMs = Math.max(0, now - startedAt);
+    const virtualProgress = 6 + 88 * (1 - Math.exp(-elapsedMs / 90000));
+    return clampQueueProgress(Math.max(actualProgress, Math.min(94, virtualProgress)));
+  }
+
+  if (item.status === 'writing_outputs') {
+    return clampQueueProgress(Math.max(actualProgress, 96));
+  }
+
+  return actualProgress;
+};
+
+const updateQueueProgressVisual = (item: QueueState['items'][number]) => {
+  const ref = queueProgressRefs.get(item.id);
+  if (!ref) {
+    return;
+  }
+
+  const displayedProgress = queueDisplayedProgress.get(item.id) ?? clampQueueProgress(item.progress);
+  ref.progressFill.style.width = `${displayedProgress}%`;
+  ref.statusLabel.textContent = `${formatStatusLabel(item.status)} � ${Math.round(displayedProgress)}%`;
+};
+
+const animateQueueProgress = () => {
+  const now = Date.now();
+  let shouldContinue = false;
+
+  queueState.items.forEach((item) => {
+    const desiredProgress = getVisualQueueProgressTarget(item, now);
+    const currentProgress = queueDisplayedProgress.get(item.id) ?? desiredProgress;
+    const delta = desiredProgress - currentProgress;
+
+    let nextProgress = currentProgress;
+    if (Math.abs(delta) > 0.1) {
+      const step = Math.sign(delta) * Math.max(0.35, Math.abs(delta) * 0.12);
+      nextProgress = Math.abs(delta) <= Math.abs(step) ? desiredProgress : currentProgress + step;
+      shouldContinue = true;
+    }
+
+    if (item.status === 'transcribing' && desiredProgress < 94) {
+      shouldContinue = true;
+    }
+
+    queueDisplayedProgress.set(item.id, clampQueueProgress(nextProgress));
+    updateQueueProgressVisual(item);
+  });
+
+  if (shouldContinue) {
+    queueProgressAnimationFrame = window.requestAnimationFrame(animateQueueProgress);
+    return;
+  }
+
+  queueProgressAnimationFrame = null;
+};
+
+const ensureQueueProgressAnimation = () => {
+  if (queueProgressAnimationFrame !== null) {
+    return;
+  }
+
+  queueProgressAnimationFrame = window.requestAnimationFrame(animateQueueProgress);
 };
 
 const createQueueItem = (item: QueueState['items'][number]): HTMLLIElement => {
@@ -555,7 +858,7 @@ const renderArchive = () => {
     archiveList.append(dayGroup);
   }
 
-  archiveEmptyMessage.hidden = queueState.archiveBatches.length > 0;
+  archiveEmptyMessage.hidden = true;
 };
 
 const renderQueue = () => {
@@ -594,6 +897,14 @@ const openQueueFilePicker = async () => {
   await addFiles(selectedPaths);
 };
 
+
+const setIngestWatchFolderPanelOpen = (isOpen: boolean) => {
+  ingestWatchFolderPanel.classList.toggle('is-open', isOpen);
+  ingestWatchFolderPanel.setAttribute('aria-hidden', String(!isOpen));
+  pickIngestWatchDirectoryButton.disabled = !isOpen;
+  requestWindowFitToContent();
+};
+
 const applySettingsToUi = (settings: Awaited<ReturnType<typeof window.transcripter.settings.get>>) => {
   outputDirectoryInput.value = settings.outputDirectory;
   modelSelect.value = settings.model;
@@ -602,10 +913,19 @@ const applySettingsToUi = (settings: Awaited<ReturnType<typeof window.transcript
     languageSelect.value = 'en';
   }
   writeRunLogCheckbox.checked = Boolean(settings.writeRunLog);
+  ingestEnabledCheckbox.checked = Boolean(settings.ingestEnabled);
+  ingestWatchDirectoryInput.value = settings.ingestWatchDirectory ?? '';
+  setIngestWatchFolderPanelOpen(Boolean(settings.ingestEnabled));
   txtOutputCheckbox.checked = settings.outputOptions.txt;
   timecodedTxtOutputCheckbox.checked = settings.outputOptions.timecodedTxt;
   srtOutputCheckbox.checked = settings.outputOptions.srt;
   vttOutputCheckbox.checked = settings.outputOptions.vtt;
+  anthropicApiKeyInput.value = settings.anthropicApiKey ?? '';
+  anthropicModelInput.value = settings.anthropicModel ?? 'claude-haiku-4-5-20251001';
+  podcastSplitterOutputFolderPath = settings.podcastSplitterOutputFolder?.trim() ?? '';
+  renderPodcastSplitterOutput();
+  openaiTimeoutInput.value = String(settings.openaiTimeoutMs ?? 20000);
+  openaiMaxRetriesInput.value = String(settings.openaiMaxRetries ?? 1);
 };
 
 const saveSettings = async () => {
@@ -614,6 +934,13 @@ const saveSettings = async () => {
     language: languageSelect.value,
     model: modelSelect.value as 'tiny' | 'base' | 'small',
     writeRunLog: writeRunLogCheckbox.checked,
+    ingestEnabled: ingestEnabledCheckbox.checked,
+    ingestWatchDirectory: ingestWatchDirectoryInput.value,
+    aiProvider: 'anthropic',
+    anthropicApiKey: anthropicApiKeyInput.value,
+    anthropicModel: anthropicModelInput.value,
+    openaiTimeoutMs: Number.parseInt(openaiTimeoutInput.value, 10),
+    openaiMaxRetries: Number.parseInt(openaiMaxRetriesInput.value, 10),
     outputOptions: {
       txt: txtOutputCheckbox.checked,
       timecodedTxt: timecodedTxtOutputCheckbox.checked,
@@ -705,6 +1032,35 @@ resetSelectedButton.addEventListener('click', async () => {
   selectedIds.clear();
 });
 
+changeOutputSelectedButton.addEventListener('click', async () => {
+  const selectedIncompleteQueueItems = queueState.items.filter(
+    (item) => selectedIds.has(item.id) && item.id !== queueState.activeJobId && item.status !== 'done'
+  );
+
+  if (selectedIncompleteQueueItems.length === 0) {
+    return;
+  }
+
+  const defaultPath = selectedIncompleteQueueItems[0]?.outputDirectory ?? outputDirectoryInput.value;
+  const selectedPath = await window.transcripter.settings.pickOutputDirectory(defaultPath);
+  if (!selectedPath) {
+    return;
+  }
+
+  const result = await window.transcripter.queue.updateSelectedOutputDirectory(
+    selectedIncompleteQueueItems.map((item) => item.id),
+    selectedPath
+  );
+  if (!result.ok) {
+    if (result.error) {
+      window.alert(result.error);
+    }
+    return;
+  }
+
+  selectedIds.clear();
+});
+
 archiveCompletedButton.addEventListener('click', async () => {
   await window.transcripter.queue.archiveCompleted();
 });
@@ -763,6 +1119,18 @@ settingsBackButton.addEventListener('click', () => {
   setSettingsMenuOpen(false);
 });
 
+toggleAnthropicApiKeyButton.addEventListener('click', () => {
+  isAnthropicApiKeyVisible = !isAnthropicApiKeyVisible;
+  syncAnthropicApiKeyVisibility();
+});
+
+settingsMenu.addEventListener('click', (event) => {
+  const target = event.target as HTMLElement | null;
+  if (target && (target === settingsMenu || target.classList.contains('settings-scrim'))) {
+    setSettingsMenuOpen(false);
+  }
+});
+
 document.addEventListener('click', (event) => {
   if (!(event.target instanceof Node)) {
     return;
@@ -802,6 +1170,139 @@ closeMergeTranscriptsButton.addEventListener('click', () => {
 closeBuildProjectBundleButton.addEventListener('click', () => {
   buildProjectBundleModal.close();
 });
+
+openPodcastSplitterButton.addEventListener('click', () => {
+  setToolsMenuOpen(false);
+  resetPodcastSplitterUi();
+  podcastSplitterModal.showModal();
+});
+
+closePodcastSplitterButton.addEventListener('click', () => {
+  podcastSplitterModal.close();
+});
+
+pickPodcastSplitterFilesButton.addEventListener('click', async () => {
+  const selectedPaths = await window.transcripter.podcastSplitter.pickTranscriptFiles();
+  appendPodcastSplitterPaths(selectedPaths);
+});
+
+pickPodcastSplitterOutputButton.addEventListener('click', async () => {
+  const selectedPath = await window.transcripter.podcastSplitter.pickOutputFolder(podcastSplitterOutputFolderPath);
+  if (!selectedPath) {
+    return;
+  }
+
+  podcastSplitterOutputFolderPath = selectedPath;
+  renderPodcastSplitterOutput();
+  await window.transcripter.settings.set({ podcastSplitterOutputFolder: selectedPath });
+});
+
+podcastTargetMinInput.addEventListener('input', () => {
+  renderPodcastSplitterFileList();
+});
+
+podcastTargetMaxInput.addEventListener('input', () => {
+  renderPodcastSplitterFileList();
+});
+
+runPodcastSplitterButton.addEventListener('click', async () => {
+  if (podcastSplitterSourcePaths.length === 0 || podcastSplitterOutputFolderPath.trim().length === 0) {
+    return;
+  }
+
+  runPodcastSplitterButton.disabled = true;
+  podcastSplitterStatusList.innerHTML = '';
+  podcastSplitterStatusBuffer.splice(0, podcastSplitterStatusBuffer.length);
+  podcastSplitterStatusDetails.open = false;
+  setPodcastSplitterStatusBar('Starting splitter...', true);
+  startPodcastSplitterStatusPump();
+
+  const unsubscribeStatus = window.transcripter.podcastSplitter.onStatus((status) => {
+    podcastSplitterStatusBuffer.push(formatPodcastSplitterStatus(status));
+    if (isAiWorkingMessage(status.message)) {
+      setPodcastSplitterStatusBar(`AI working... ${status.message}`, true);
+      return;
+    }
+
+    setPodcastSplitterStatusBar(status.message, true);
+  });
+
+  try {
+    const targetMinMinutes = Number.parseFloat(podcastTargetMinInput.value);
+    const targetMaxMinutes = Number.parseFloat(podcastTargetMaxInput.value);
+
+    const result = await window.transcripter.podcastSplitter.split({
+      sourcePaths: [...podcastSplitterSourcePaths],
+      outputFolderPath: podcastSplitterOutputFolderPath,
+      targetMinMinutes,
+      targetMaxMinutes
+    });
+
+    if (!result.ok || !result.data) {
+      setPodcastSplitterStatusBar(`Failed: ${result.error ?? 'Unknown error'}`, false);
+      window.alert(`Podcast splitter failed: ${result.error ?? 'Unknown error'}`);
+      return;
+    }
+
+    renderPodcastSplitterResults(result.data);
+    setPodcastSplitterStatusBar('Splitter complete.', false);
+    window.alert(
+      `Podcast splitter completed. Successes: ${result.data.successes.length}, failures: ${result.data.failures.length}. Report: ${result.data.reportPath}`
+    );
+  } finally {
+    unsubscribeStatus();
+    while (podcastSplitterStatusBuffer.length > 0) {
+      const line = podcastSplitterStatusBuffer.shift();
+      if (line) {
+        appendPodcastSplitterStatusLine(line);
+      }
+    }
+    stopPodcastSplitterStatusPump();
+    podcastSplitterStatusSpinner.hidden = true;
+    renderPodcastSplitterFileList();
+  }
+});
+podcastSplitterDropZone.addEventListener('dragover', (event) => {
+  event.preventDefault();
+  podcastSplitterDropZone.classList.add('dragging');
+});
+
+podcastSplitterDropZone.addEventListener('dragleave', () => {
+  podcastSplitterDropZone.classList.remove('dragging');
+});
+
+podcastSplitterDropZone.addEventListener('drop', (event: DragEvent) => {
+  event.preventDefault();
+  podcastSplitterDropZone.classList.remove('dragging');
+
+  const filePaths = [...(event.dataTransfer?.files ?? [])]
+    .flatMap((file) => {
+      const directPath = (file as File & { path?: string }).path;
+      if (typeof directPath === 'string' && directPath.length > 0) {
+        return [directPath];
+      }
+
+      const fallbackPath = window.transcripter.queue.getPathForFile(file);
+      return fallbackPath.length > 0 ? [fallbackPath] : [];
+    });
+
+  const uriList = event.dataTransfer?.getData('text/uri-list') ?? '';
+  const droppedUris = uriList
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith('#'))
+    .flatMap((line) => {
+      const path = fileUrlToPath(line);
+      return path ? [path] : [];
+    });
+
+  appendPodcastSplitterPaths([...new Set([...filePaths, ...droppedUris])]);
+});
+
+podcastSplitterModal.addEventListener('close', () => {
+  resetPodcastSplitterUi();
+});
+
 
 pickBundleJobsFolderButton.addEventListener('click', async () => {
   const selectedPath = await window.transcripter.projectBundle.pickJobsFolder(bundleJobFolderPath);
@@ -974,6 +1475,16 @@ pickOutputDirectoryButton.addEventListener('click', async () => {
   await saveSettings();
 });
 
+pickIngestWatchDirectoryButton.addEventListener('click', async () => {
+  const selectedPath = await window.transcripter.settings.pickIngestWatchDirectory(ingestWatchDirectoryInput.value);
+  if (!selectedPath) {
+    return;
+  }
+
+  ingestWatchDirectoryInput.value = selectedPath;
+  await saveSettings();
+});
+
 settingsForm.addEventListener('submit', (event) => {
   event.preventDefault();
 });
@@ -985,16 +1496,25 @@ for (const element of [
   txtOutputCheckbox,
   timecodedTxtOutputCheckbox,
   srtOutputCheckbox,
-  vttOutputCheckbox
+  vttOutputCheckbox,  anthropicApiKeyInput,
+  anthropicModelInput,
+  openaiTimeoutInput,
+  openaiMaxRetriesInput
 ]) {
   element.addEventListener('change', () => {
     void saveSettings();
   });
 }
 
+ingestEnabledCheckbox.addEventListener('change', () => {
+  setIngestWatchFolderPanelOpen(ingestEnabledCheckbox.checked);
+  void saveSettings();
+});
+
 const bootstrap = async () => {
   const settings = await window.transcripter.settings.get();
   applySettingsToUi(settings);
+  syncAnthropicApiKeyVisibility();
 
   const initialLogs = await window.transcripter.logs.list();
   appLogs.push(...initialLogs.slice(-MAX_CONSOLE_LINES));
@@ -1024,9 +1544,37 @@ const bootstrap = async () => {
 
   renderConsole();
   renderMergeTranscriptList();
+  resetPodcastSplitterUi();
   await refreshQueueState();
   syncActiveJobTimer();
-  window.addEventListener('resize', requestWindowFitToContent);
 };
 
 void bootstrap();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

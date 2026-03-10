@@ -5,6 +5,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { buildProjectBundle, validateProjectBundleInput } from './project-bundle/builder';
 import { resolveFfmpegPathWithMeta } from './ffmpeg-path';
+import { splitPodcastTranscripts } from './podcast-splitter';
 import { writeJobJsonOutput, writeSelectedOutputs } from './output/writers';
 import { ProcessorClient } from './processor-client';
 import type {
@@ -18,6 +19,9 @@ import type {
   ProjectBundleResponse,
   ProjectBundleValidationSummary,
   QueueItem,
+  PodcastSplitterStatus,
+  SplitRequest,
+  SplitResult,
   WhisperModel
 } from './types';
 import { resolveWhisperModelDirectoryWithMeta, resolveWhisperPathWithMeta } from './whisper-path';
@@ -26,6 +30,7 @@ const settingsPath = path.join(app.getPath('userData'), 'settings.json');
 const archivePath = path.join(app.getPath('userData'), 'archive.json');
 const defaultSettings: AppSettings = {
   outputDirectory: app.getPath('documents'),
+  podcastSplitterOutputFolder: '',
   language: 'en',
   model: 'base',
   outputOptions: {
@@ -36,7 +41,16 @@ const defaultSettings: AppSettings = {
     json: true
   },
   overwritePolicy: 'overwrite',
-  writeRunLog: false
+  writeRunLog: false,
+  ingestEnabled: false,
+  ingestWatchDirectory: '',
+  aiProvider: 'anthropic',
+  openaiApiKey: '',
+  openaiModel: 'gpt-4.1-mini',
+  anthropicApiKey: '',
+  anthropicModel: 'claude-haiku-4-5-20251001',
+  openaiTimeoutMs: 20000,
+  openaiMaxRetries: 1
 };
 
 const queue: QueueItem[] = [];
@@ -67,6 +81,20 @@ type RunSummary = {
 
 let activeRun: RunSummary | null = null;
 let quitAfterArchiving = false;
+const INGEST_POLL_INTERVAL_MS = 7000;
+const INGEST_STABLE_DURATION_MS = 3000;
+const INGEST_ALLOWED_EXTENSIONS = new Set(['.mp3', '.wav', '.m4a', '.flac', '.ogg', '.aac', '.mp4', '.mov', '.mkv', '.webm']);
+
+type IngestObservation = {
+  size: number;
+  mtimeMs: number;
+  stableSince: number | null;
+};
+
+const ingestObservations = new Map<string, IngestObservation>();
+const ingestQueuedPaths = new Set<string>();
+let ingestPollTimer: NodeJS.Timeout | null = null;
+let ingestPollInFlight = false;
 
 const getErrorCode = (errorMessage: string): string => {
   const normalized = errorMessage.toLowerCase();
@@ -144,6 +172,10 @@ const sanitizeSettings = (value: unknown): AppSettings => {
 
   return {
     outputDirectory,
+    podcastSplitterOutputFolder:
+      typeof candidate.podcastSplitterOutputFolder === 'string' && candidate.podcastSplitterOutputFolder.trim().length > 0
+        ? path.resolve(candidate.podcastSplitterOutputFolder)
+        : defaultSettings.podcastSplitterOutputFolder,
     language:
       typeof candidate.language === 'string' && candidate.language.trim().length > 0
         ? candidate.language.trim()
@@ -151,7 +183,34 @@ const sanitizeSettings = (value: unknown): AppSettings => {
     model: isWhisperModel(candidate.model) ? candidate.model : defaultSettings.model,
     outputOptions: sanitizeOutputOptions(candidate.outputOptions),
     overwritePolicy: candidate.overwritePolicy === 'skip-existing' ? 'skip-existing' : defaultSettings.overwritePolicy,
-    writeRunLog: typeof candidate.writeRunLog === 'boolean' ? candidate.writeRunLog : defaultSettings.writeRunLog
+    writeRunLog: typeof candidate.writeRunLog === 'boolean' ? candidate.writeRunLog : defaultSettings.writeRunLog,
+    ingestEnabled: typeof candidate.ingestEnabled === 'boolean' ? candidate.ingestEnabled : defaultSettings.ingestEnabled,
+    ingestWatchDirectory:
+      typeof candidate.ingestWatchDirectory === 'string' && candidate.ingestWatchDirectory.trim().length > 0
+        ? path.resolve(candidate.ingestWatchDirectory)
+        : defaultSettings.ingestWatchDirectory,
+    aiProvider: 'anthropic',
+    openaiApiKey: typeof candidate.openaiApiKey === 'string' ? candidate.openaiApiKey.trim() : defaultSettings.openaiApiKey,
+    openaiModel:
+      typeof candidate.openaiModel === 'string' && candidate.openaiModel.trim().length > 0
+        ? candidate.openaiModel.trim()
+        : defaultSettings.openaiModel,
+    anthropicApiKey:
+      typeof candidate.anthropicApiKey === 'string' ? candidate.anthropicApiKey.trim() : defaultSettings.anthropicApiKey,
+    anthropicModel:
+      typeof candidate.anthropicModel === 'string' && candidate.anthropicModel.trim().length > 0
+        ? candidate.anthropicModel.trim() === 'claude-3-5-sonnet-latest' || candidate.anthropicModel.trim() === 'claude-sonnet-4-0'
+          ? defaultSettings.anthropicModel
+          : candidate.anthropicModel.trim()
+        : defaultSettings.anthropicModel,
+    openaiTimeoutMs:
+      typeof candidate.openaiTimeoutMs === 'number' && Number.isFinite(candidate.openaiTimeoutMs)
+        ? Math.min(120000, Math.max(3000, Math.round(candidate.openaiTimeoutMs)))
+        : defaultSettings.openaiTimeoutMs,
+    openaiMaxRetries:
+      typeof candidate.openaiMaxRetries === 'number' && Number.isFinite(candidate.openaiMaxRetries)
+        ? Math.min(4, Math.max(0, Math.round(candidate.openaiMaxRetries)))
+        : defaultSettings.openaiMaxRetries
   };
 };
 
@@ -210,15 +269,25 @@ const appendLog = (entry: Omit<AppLogEntry, 'timestamp'>) => {
   }
 };
 
-const MIN_CONTENT_HEIGHT = 760;
+const BASE_MIN_WINDOW_HEIGHT = 760;
 const WINDOW_HEIGHT_PADDING = 56;
 
+const ensureDisplayBoundedMinimumSize = (window: BrowserWindow): number => {
+  const display = screen.getDisplayMatching(window.getBounds());
+  const [currentMinWidth] = window.getMinimumSize();
+  const boundedMinWidth = Math.min(currentMinWidth, display.workAreaSize.width);
+  const boundedMinHeight = Math.min(BASE_MIN_WINDOW_HEIGHT, display.workAreaSize.height);
+  window.setMinimumSize(boundedMinWidth, boundedMinHeight);
+  return boundedMinHeight;
+};
+
 const ensureWindowCanFitContent = (window: BrowserWindow, requestedContentHeight: number) => {
+  const minWindowHeight = ensureDisplayBoundedMinimumSize(window);
   const display = screen.getDisplayMatching(window.getBounds());
   const maxWindowHeight = display.workAreaSize.height;
   const [currentWindowWidth, currentWindowHeight] = window.getSize();
   const desiredWindowHeight = Math.min(
-    Math.max(MIN_CONTENT_HEIGHT, Math.ceil(requestedContentHeight) + WINDOW_HEIGHT_PADDING),
+    Math.max(minWindowHeight, Math.ceil(requestedContentHeight) + WINDOW_HEIGHT_PADDING),
     maxWindowHeight
   );
 
@@ -328,6 +397,210 @@ const persistSettings = async (next: Partial<AppSettings>) => {
   return merged;
 };
 
+
+const normalizeIngestPathKey = (candidatePath: string): string => path.resolve(candidatePath).toLowerCase();
+
+const canIngestFile = (candidatePath: string): boolean => INGEST_ALLOWED_EXTENSIONS.has(path.extname(candidatePath).toLowerCase());
+
+const hasPathInQueueOrArchive = (candidatePath: string): boolean => {
+  const pathKey = normalizeIngestPathKey(candidatePath);
+  if (ingestQueuedPaths.has(pathKey)) {
+    return true;
+  }
+
+  if (queue.some((item) => normalizeIngestPathKey(item.sourcePath) === pathKey)) {
+    return true;
+  }
+
+  return archiveBatches.some((batch) => batch.items.some((item) => normalizeIngestPathKey(item.sourcePath) === pathKey));
+};
+
+const queueFileForIngest = async (sourcePath: string): Promise<void> => {
+  if (hasPathInQueueOrArchive(sourcePath)) {
+    return;
+  }
+
+  const settings = await readSettings();
+  const pathKey = normalizeIngestPathKey(sourcePath);
+  const shouldKickQueue = !activeJobId;
+
+  const queuedItem: QueueItem = {
+    id: randomUUID(),
+    sourcePath,
+    outputDirectory: settings.outputDirectory,
+    outputOptions: settings.outputOptions,
+    model: settings.model,
+    language: settings.language,
+    status: 'pending',
+    progress: 0,
+    elapsedMs: 0
+  };
+
+  queue.push(queuedItem);
+  ingestQueuedPaths.add(pathKey);
+  appendLog({ level: 'info', event: 'ingest.queued', filePath: sourcePath, message: `Queued from ingest folder: ${path.basename(sourcePath)}` });
+
+  if (activeRun) {
+    queuedItem.batchId = activeRun.runId;
+    queuedItem.batchStartedAt = activeRun.startedAt;
+    activeRun.total += 1;
+  } else {
+    const runId = randomUUID();
+    const runStartedAt = new Date().toISOString();
+    activeRun = {
+      runId,
+      startedAt: runStartedAt,
+      total: queue.filter((item) => item.status === 'pending').length,
+      done: 0,
+      failed: 0,
+      canceled: 0,
+      writeRunLog: Boolean(settings.writeRunLog),
+      logOutputDirectory: settings.outputDirectory
+    };
+
+    for (const item of queue) {
+      if (item.status === 'pending') {
+        item.batchId = runId;
+        item.batchStartedAt = runStartedAt;
+      }
+    }
+
+    appendLog({ level: 'info', event: 'queue.started', message: 'Queue start requested (ingest).' });
+  }
+
+  emitQueueState();
+
+  if (shouldKickQueue) {
+    queuePaused = false;
+    void processNextPending();
+  }
+};
+
+const runIngestPoll = async (): Promise<void> => {
+  if (ingestPollInFlight) {
+    return;
+  }
+
+  ingestPollInFlight = true;
+  try {
+    const settings = await readSettings();
+    const watchDirectory = settings.ingestWatchDirectory?.trim() ?? '';
+
+    if (!settings.ingestEnabled || watchDirectory.length === 0) {
+      ingestObservations.clear();
+      return;
+    }
+
+    const entries = await fs.readdir(watchDirectory, { withFileTypes: true });
+    const observedPathKeys = new Set<string>();
+    const readyPaths: string[] = [];
+    const now = Date.now();
+
+    for (const entry of entries) {
+      if (!entry.isFile()) {
+        continue;
+      }
+
+      const sourcePath = path.join(watchDirectory, entry.name);
+      if (!canIngestFile(sourcePath)) {
+        continue;
+      }
+
+      const pathKey = normalizeIngestPathKey(sourcePath);
+      observedPathKeys.add(pathKey);
+
+      if (hasPathInQueueOrArchive(sourcePath)) {
+        ingestObservations.delete(pathKey);
+        continue;
+      }
+
+      let stat;
+      try {
+        stat = await fs.stat(sourcePath);
+      } catch {
+        ingestObservations.delete(pathKey);
+        continue;
+      }
+
+      if (!stat.isFile()) {
+        ingestObservations.delete(pathKey);
+        continue;
+      }
+
+      const previous = ingestObservations.get(pathKey);
+      if (!previous) {
+        ingestObservations.set(pathKey, { size: stat.size, mtimeMs: stat.mtimeMs, stableSince: null });
+        continue;
+      }
+
+      if (previous.size !== stat.size || previous.mtimeMs !== stat.mtimeMs) {
+        previous.size = stat.size;
+        previous.mtimeMs = stat.mtimeMs;
+        previous.stableSince = null;
+        continue;
+      }
+
+      if (previous.stableSince === null) {
+        previous.stableSince = now;
+        continue;
+      }
+
+      if (now - previous.stableSince >= INGEST_STABLE_DURATION_MS) {
+        readyPaths.push(sourcePath);
+      }
+    }
+
+    for (const [pathKey] of ingestObservations) {
+      if (!observedPathKeys.has(pathKey)) {
+        ingestObservations.delete(pathKey);
+      }
+    }
+
+    for (const readyPath of readyPaths) {
+      ingestObservations.delete(normalizeIngestPathKey(readyPath));
+      await queueFileForIngest(readyPath);
+    }
+  } catch (error) {
+    appendLog({
+      level: 'error',
+      event: 'ingest.poll_failed',
+      message: `Ingest poll failed: ${error instanceof Error ? error.message : String(error)}`
+    });
+  } finally {
+    ingestPollInFlight = false;
+  }
+};
+
+const stopIngestWatcher = () => {
+  if (ingestPollTimer) {
+    clearInterval(ingestPollTimer);
+    ingestPollTimer = null;
+  }
+  ingestObservations.clear();
+};
+
+const syncIngestWatcher = async () => {
+  const settings = await readSettings();
+  const watchDirectory = settings.ingestWatchDirectory?.trim() ?? '';
+  const shouldRun = Boolean(settings.ingestEnabled && watchDirectory.length > 0);
+
+  if (!shouldRun) {
+    if (ingestPollTimer) {
+      appendLog({ level: 'info', event: 'ingest.stopped', message: 'Ingest watcher stopped.' });
+    }
+    stopIngestWatcher();
+    return;
+  }
+
+  if (!ingestPollTimer) {
+    ingestPollTimer = setInterval(() => {
+      void runIngestPoll();
+    }, INGEST_POLL_INTERVAL_MS);
+    appendLog({ level: 'info', event: 'ingest.started', message: `Ingest watcher started for ${watchDirectory}` });
+  }
+
+  void runIngestPoll();
+};
 
 const writeRunLogFile = async (summary: RunSummary): Promise<void> => {
   if (!summary.writeRunLog) {
@@ -517,6 +790,8 @@ void (async () => {
       message: `Runtime check passed (${ffmpegRuntime.mode} mode): FFmpeg, whisper.cpp, and model files were detected.`
     });
   }
+
+  await syncIngestWatcher();
 })();
 
 const queueItemToJob = (item: QueueItem): ProcessingJob => ({
@@ -851,6 +1126,8 @@ processor.on('error', async (payload) => {
 });
 
 app.on('before-quit', (event) => {
+  stopIngestWatcher();
+
   if (quitAfterArchiving) {
     processor.dispose();
     return;
@@ -899,9 +1176,26 @@ ipcMain.handle('file:writeText', async (_event, filePath: string, content: strin
 });
 
 ipcMain.handle('settings:get', () => readSettings());
-ipcMain.handle('settings:set', async (_event, next: Partial<AppSettings>) => persistSettings(next));
+ipcMain.handle('settings:set', async (_event, next: Partial<AppSettings>) => {
+  const updated = await persistSettings(next);
+  await syncIngestWatcher();
+  return updated;
+});
 
 ipcMain.handle('settings:pickOutputDirectory', async (_event, defaultPath?: string) => {
+  const result = await dialog.showOpenDialog({
+    defaultPath,
+    properties: ['openDirectory', 'createDirectory']
+  });
+
+  if (result.canceled) {
+    return null;
+  }
+
+  return result.filePaths[0] ?? null;
+});
+
+ipcMain.handle('settings:pickIngestWatchDirectory', async (_event, defaultPath?: string) => {
   const result = await dialog.showOpenDialog({
     defaultPath,
     properties: ['openDirectory', 'createDirectory']
@@ -927,6 +1221,78 @@ ipcMain.handle('settings:pickSaveFile', async (_event, defaultPath?: string) => 
   return result.filePath ?? null;
 });
 
+
+ipcMain.handle('podcastSplitter:pickTranscriptFiles', async () => {
+  const result = await dialog.showOpenDialog({
+    properties: ['openFile', 'multiSelections'],
+    filters: [
+      { name: 'Transcript Files', extensions: ['txt', 'json'] },
+      { name: 'Text Files', extensions: ['txt'] },
+      { name: 'Job JSON Files', extensions: ['json'] }
+    ]
+  });
+
+  if (result.canceled) {
+    return [];
+  }
+
+  return result.filePaths.filter((filePath) => {
+    const lower = filePath.toLowerCase();
+    return lower.endsWith('.txt') || lower.endsWith('.job.json');
+  });
+});
+
+ipcMain.handle('podcastSplitter:pickOutputFolder', async (_event, defaultPath?: string) => {
+  const result = await dialog.showOpenDialog({
+    defaultPath,
+    properties: ['openDirectory', 'createDirectory']
+  });
+
+  if (result.canceled) {
+    return null;
+  }
+
+  return result.filePaths[0] ?? null;
+});
+
+ipcMain.handle('podcastSplitter:split', async (event, input: SplitRequest): Promise<{ ok: boolean; data?: SplitResult; error?: string }> => {
+  if (!input || typeof input !== 'object') {
+    return { ok: false, error: 'Invalid podcast splitter input.' };
+  }
+
+  try {
+    const settings = await readSettings();
+    const runId = randomUUID();
+
+    const pushPodcastSplitterStatus = (status: PodcastSplitterStatus) => {
+      event.sender.send('podcastSplitter:status', status);
+      appendLog({
+        level: 'info',
+        event: 'podcastSplitter.status',
+        filePath: status.sourcePath,
+        message: status.message
+      });
+    };
+
+    const result = await splitPodcastTranscripts(input, {
+      settings,
+      runId,
+      onStatus: pushPodcastSplitterStatus
+    });
+
+    appendLog({
+      level: 'info',
+      event: 'podcastSplitter.completed',
+      message: `Podcast splitter finished. Successes: ${result.successes.length}, failures: ${result.failures.length}.`
+    });
+
+    return { ok: true, data: result };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    appendLog({ level: 'error', event: 'podcastSplitter.failed', message });
+    return { ok: false, error: message };
+  }
+});
 
 ipcMain.handle('projectBundle:pickJobsFolder', async (_event, defaultPath?: string) => {
   const result = await dialog.showOpenDialog({
@@ -1103,6 +1469,45 @@ ipcMain.handle('queue:resetSelected', (_event, ids: string[]) => {
   return { ok: true as const };
 });
 
+ipcMain.handle('queue:updateSelectedOutputDirectory', (_event, ids: string[], outputDirectory: string) => {
+  if (activeJobId) {
+    return {
+      ok: false as const,
+      error: 'Pause or stop active transcription jobs before changing output locations in the queue.'
+    };
+  }
+
+  if (typeof outputDirectory !== 'string' || outputDirectory.trim().length === 0) {
+    return { ok: false as const, error: 'Output directory is required.' };
+  }
+
+  const selectedIds = new Set(ids);
+  const resolvedOutputDirectory = path.resolve(outputDirectory);
+  let updatedCount = 0;
+
+  for (const item of queue) {
+    if (!selectedIds.has(item.id) || item.status === 'done') {
+      continue;
+    }
+
+    item.outputDirectory = resolvedOutputDirectory;
+    updatedCount += 1;
+  }
+
+  if (updatedCount === 0) {
+    return { ok: false as const, error: 'No selected incomplete queue items were updated.' };
+  }
+
+  appendLog({
+    level: 'info',
+    event: 'queue.output_directory_updated',
+    message: 'Updated output location for ' + updatedCount + ' selected incomplete queue item(s) to ' + resolvedOutputDirectory + '.'
+  });
+
+  emitQueueState();
+  return { ok: true as const };
+});
+
 ipcMain.handle('queue:archiveCompleted', async () => {
   try {
     await archiveCompletedQueueItems();
@@ -1256,3 +1661,13 @@ ipcMain.handle('queue:openOutputFolder', async (_event, id: string) => {
   await shell.openPath(item.outputDirectory);
   return { ok: true as const };
 });
+
+
+
+
+
+
+
+
+
+

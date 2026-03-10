@@ -3,11 +3,14 @@ import type {
   AppLogEntry,
   AppSettings,
   ArchiveBatch,
+  PodcastSplitterStatus,
   ProjectBundleBuildSummary,
   ProjectBundleInput,
   ProjectBundleResponse,
   ProjectBundleValidationSummary,
-  QueueItem
+  QueueItem,
+  SplitRequest,
+  SplitResult
 } from '../main/types';
 
 export type QueueState = {
@@ -30,6 +33,8 @@ const api = {
     list: (): Promise<QueueState> => ipcRenderer.invoke('queue:list'),
     removeSelected: (ids: string[]): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('queue:removeSelected', ids),
     resetSelected: (ids: string[]): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('queue:resetSelected', ids),
+    updateSelectedOutputDirectory: (ids: string[], outputDirectory: string): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('queue:updateSelectedOutputDirectory', ids, outputDirectory),
     archiveCompleted: (): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('queue:archiveCompleted'),
     clearArchive: (): Promise<{ ok: true }> => ipcRenderer.invoke('queue:clearArchive'),
     start: (): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('queue:start'),
@@ -50,6 +55,8 @@ const api = {
     set: (next: Partial<AppSettings>): Promise<AppSettings> => ipcRenderer.invoke('settings:set', next),
     pickOutputDirectory: (defaultPath?: string): Promise<string | null> =>
       ipcRenderer.invoke('settings:pickOutputDirectory', defaultPath),
+    pickIngestWatchDirectory: (defaultPath?: string): Promise<string | null> =>
+      ipcRenderer.invoke('settings:pickIngestWatchDirectory', defaultPath),
     pickSaveFile: (defaultPath?: string): Promise<string | null> => ipcRenderer.invoke('settings:pickSaveFile', defaultPath)
   },
   logs: {
@@ -59,6 +66,19 @@ const api = {
       ipcRenderer.on('app-log:entry', wrapped);
       return () => {
         ipcRenderer.removeListener('app-log:entry', wrapped);
+      };
+    }
+  },
+  podcastSplitter: {
+    pickTranscriptFiles: (): Promise<string[]> => ipcRenderer.invoke('podcastSplitter:pickTranscriptFiles'),
+    pickOutputFolder: (defaultPath?: string): Promise<string | null> => ipcRenderer.invoke('podcastSplitter:pickOutputFolder', defaultPath),
+    split: (input: SplitRequest): Promise<{ ok: boolean; data?: SplitResult; error?: string }> =>
+      ipcRenderer.invoke('podcastSplitter:split', input),
+    onStatus: (listener: (status: PodcastSplitterStatus) => void): (() => void) => {
+      const wrapped = (_event: unknown, payload: PodcastSplitterStatus) => listener(payload);
+      ipcRenderer.on('podcastSplitter:status', wrapped);
+      return () => {
+        ipcRenderer.removeListener('podcastSplitter:status', wrapped);
       };
     }
   },
@@ -82,3 +102,7 @@ const api = {
 contextBridge.exposeInMainWorld('transcripter', api);
 
 export type TranscripterApi = typeof api;
+
+
+
+
