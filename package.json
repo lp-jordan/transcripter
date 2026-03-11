@@ -13,12 +13,15 @@
     "build:main": "esbuild src/main/main.ts --bundle --platform=node --target=node20 --external:electron --outfile=dist/main/main.js",
     "build:preload": "esbuild src/preload/preload.ts --bundle --platform=node --target=node20 --external:electron --outfile=dist/preload/preload.js",
     "build:renderer": "vite build",
-    "package": "npm run build && npm run prepare:runtime && electron-builder",
-    "package:win": "npm run build && npm run prepare:runtime && electron-builder --win",
-    "package:mac": "npm run build && npm run prepare:runtime && electron-builder --mac",
+    "package": "node scripts/package-release.mjs",
+    "package:win": "node scripts/package-release.mjs --win",
+    "package:mac": "node scripts/package-release.mjs --mac",
+    "package:mac:all": "node scripts/package-release.mjs --mac --arch=all",
+    "package:mac:x64": "node scripts/package-release.mjs --mac --arch=x64",
+    "package:mac:arm64": "node scripts/package-release.mjs --mac --arch=arm64",
     "build:worker": "esbuild src/main/processing-worker.ts --bundle --platform=node --target=node20 --outfile=dist/main/processing-worker.js",
-    "postinstall": "node scripts/download-whisper-base-model.mjs && node scripts/setup-whisper-runtime.mjs",
-    "prepare:runtime": "node scripts/setup-whisper-runtime.mjs"
+    "postinstall": "node scripts/download-whisper-base-model.mjs && node scripts/prepare-runtime.mjs",
+    "prepare:runtime": "node scripts/prepare-runtime.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.13.10",
@@ -90,7 +93,7 @@
     },
     "extraResources": [
       {
-        "from": "node_modules/ffmpeg-static",
+        "from": "runtime/ffmpeg",
         "to": "ffmpeg",
         "filter": [
           "ffmpeg",

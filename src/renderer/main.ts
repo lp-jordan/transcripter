@@ -383,8 +383,8 @@ const renderPodcastSplitterResults = (
         ? 'AI used (Claude)'
         : `Fallback used (${entry.aiWarning ?? 'no AI output returned'})`
       : `Fallback used (${entry.aiWarning ?? 'Claude key missing or AI disabled'})`;
-    item.textContent = `${getFileName(entry.sourcePath)} -> ${entry.chunkCount} chunk(s), ${aiDetail}`;
-    item.title = entry.manifestPath;
+    item.textContent = `${getFileName(entry.sourcePath)} -> ${entry.videoCount ?? entry.chunkCount} video(s), ${aiDetail}`;
+    item.title = entry.videoManifestPath ?? entry.manifestPath;
     podcastSplitterResults.append(item);
   });
 
@@ -1550,6 +1550,7 @@ const bootstrap = async () => {
 };
 
 void bootstrap();
+
 
 
 

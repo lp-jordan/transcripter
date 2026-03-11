@@ -133,6 +133,22 @@ export type SplitChunk = {
   charCount: number;
 };
 
+export type SplitVideoVerificationStatus = 'verified' | 'assembled' | 'fallback';
+
+export type SplitVideo = {
+  index: number;
+  title: string;
+  summary: string;
+  startSec: number;
+  endSec: number;
+  durationSec: number;
+  textFile: string;
+  charCount: number;
+  sourceChunkIndexes: number[];
+  verificationStatus: SplitVideoVerificationStatus;
+  notes?: string[];
+};
+
 export type SplitManifest = {
   source: {
     fileName: string;
@@ -151,7 +167,8 @@ export type SplitManifest = {
     hardMinSec: number;
     hardMaxSec: number;
   };
-  chunks: SplitChunk[];
+  videos: SplitVideo[];
+  chunks?: SplitChunk[];
 };
 
 export type SplitFailure = {
@@ -163,6 +180,8 @@ export type SplitSuccess = {
   sourcePath: string;
   outputFolderPath: string;
   manifestPath: string;
+  videoManifestPath: string;
+  videoCount: number;
   chunkCount: number;
   generationMode: 'ai' | 'fallback';
   splitMethod: 'ai:anthropic' | 'fallback';
@@ -237,9 +256,3 @@ export type ProjectBundleResponse<T> =
         | 'WRITE_FAILED';
       data?: ProjectBundleValidationSummary;
     };
-
-
-
-
-
-

@@ -4,8 +4,8 @@ import { app } from 'electron';
 import type { WhisperModel } from './types';
 
 const whisperExecutableNames = process.platform === 'win32'
-  ? ['main.exe', 'whisper.exe', 'whisper-cli.exe']
-  : ['main', 'whisper', 'whisper-cli'];
+  ? ['whisper-cli.exe', 'whisper.exe', 'main.exe']
+  : ['whisper-cli', 'whisper', 'main'];
 
 type RuntimePathResolution = {
   resolvedPath: string;

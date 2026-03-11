@@ -1,7 +1,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { AppSettings, PodcastSplitterStatus, Segment, SplitChunk, SplitManifest, SplitRequest, SplitResult, SplitSuccess } from './types';
+import nlp from 'compromise';
+import type { AppSettings, PodcastSplitterStatus, Segment, SplitChunk, SplitManifest, SplitRequest, SplitResult, SplitSuccess, SplitVideo, SplitVideoVerificationStatus } from './types';
 import { formatClockTimestamp, normalizeText } from './output/formatting';
 
 type NormalizedTranscript = {
@@ -485,16 +486,6 @@ const parseJsonFromText = (value: string): OpenAiResult | null => {
   }
 };
 
-type AiPlanOutcome = {
-  ranges: ChunkRange[] | null;
-  attempted: boolean;
-  warning?: string;
-};
-
-type HierarchicalAiPlanOutcome = AiPlanOutcome & {
-  usedWindowing: boolean;
-};
-
 const getAnthropicErrorMessage = (status: number, responseBody: string): string => {
   if (status === 401 || status === 403) {
     return 'Claude API key was rejected (401/403). Check the Anthropic key in Settings.';
@@ -532,106 +523,149 @@ const buildCoarseWindows = (segments: Segment[]): ChunkRange[] => {
   const windowPolicy = getCoarseWindowPolicy();
   return enforceDurationPolicy(deterministicSplit(segments, windowPolicy), segments, windowPolicy);
 };
+type AiPlanOutcome = {
+  ranges: ChunkRange[] | null;
+  attempted: boolean;
+  warning?: string;
+};
 
-const requestAnthropicSplitPlan = async (
-  segments: Segment[],
-  policy: DurationPolicy,
-  settings: AppSettings,
-  fetchImpl: typeof fetch
-): Promise<AiPlanOutcome> => {
+type HierarchicalAiPlanOutcome = AiPlanOutcome & {
+  usedWindowing: boolean;
+};
+
+type ProposedCut = {
+  startIndex: number;
+  endIndex: number;
+  justification?: string;
+};
+
+type Stage2ValidationResult = {
+  overall_pass: boolean;
+  move: 'keep' | 'forward' | 'backward';
+  reason: string;
+  flags?: string[];
+};
+
+type Stage3VideoMetadata = {
+  title: string;
+  summary: string;
+};
+
+type BoundaryRiskSignal = 'question' | 'story' | 'framework' | 'continuation';
+
+type AnthropicTextResponse = {
+  attempted: boolean;
+  text: string | null;
+  warning?: string;
+};
+
+const extractJsonSnippet = (value: string): string | null => {
+  const fencedMatch = value.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = fencedMatch ? fencedMatch[1] : value;
+  const firstBrace = candidate.indexOf('{');
+  const lastBrace = candidate.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    return candidate.slice(firstBrace, lastBrace + 1);
+  }
+
+  const firstBracket = candidate.indexOf('[');
+  const lastBracket = candidate.lastIndexOf(']');
+  if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
+    return candidate.slice(firstBracket, lastBracket + 1);
+  }
+
+  return null;
+};
+
+const parseJsonValue = <T>(value: string): T | null => {
+  const snippet = extractJsonSnippet(value);
+  if (!snippet) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(snippet) as T;
+  } catch {
+    return null;
+  }
+};
+
+const getAnthropicRequestConfig = (settings: AppSettings, unitCount: number) => {
   const apiKey = settings.anthropicApiKey?.trim() ?? '';
-  if (apiKey.length === 0) {
+  const model = settings.anthropicModel?.trim() || DEFAULT_ANTHROPIC_MODEL;
+  let timeoutMs = clamp(settings.openaiTimeoutMs ?? DEFAULT_OPENAI_TIMEOUT_MS, 10_000, 300_000);
+  let retries = clamp(settings.openaiMaxRetries ?? DEFAULT_OPENAI_MAX_RETRIES, 0, 6);
+  const adaptiveTimeoutMs = clamp(30_000 + unitCount * 250, 30_000, 300_000);
+  timeoutMs = Math.max(timeoutMs, adaptiveTimeoutMs);
+  if (unitCount > 160) {
+    retries = Math.max(retries, 2);
+  }
+
+  return { apiKey, model, timeoutMs, retries };
+};
+
+const getRetryDelayMs = (attempt: number, response: Response | null): number => {
+  if (response?.status === 429) {
+    const headerValue = response.headers.get('anthropic-ratelimit-tokens-reset') ?? response.headers.get('retry-after');
+    if (headerValue) {
+      const seconds = Number(headerValue);
+      if (Number.isFinite(seconds) && seconds > 0) {
+        return Math.ceil(seconds * 1000);
+      }
+
+      const dateMs = Date.parse(headerValue);
+      if (Number.isFinite(dateMs)) {
+        return Math.max(0, dateMs - Date.now());
+      }
+    }
+  }
+
+  return Math.min(4_000, 750 * attempt);
+};
+
+const callAnthropicText = async (
+  systemPrompt: string,
+  userPrompt: string,
+  settings: AppSettings,
+  fetchImpl: typeof fetch,
+  options?: {
+    maxTokens?: number;
+    model?: string;
+    unitCount?: number;
+    temperature?: number;
+  }
+): Promise<AnthropicTextResponse> => {
+  const unitCount = options?.unitCount ?? 1;
+  const config = getAnthropicRequestConfig(settings, unitCount);
+  if (config.apiKey.length === 0) {
     return {
-      ranges: null,
       attempted: false,
+      text: null,
       warning: 'Claude API key missing in Settings. Used fallback splitter.'
     };
   }
 
-  const model = settings.anthropicModel?.trim() || DEFAULT_ANTHROPIC_MODEL;
-  let timeoutMs = clamp(settings.openaiTimeoutMs ?? DEFAULT_OPENAI_TIMEOUT_MS, 10_000, 300_000);
-  let retries = clamp(settings.openaiMaxRetries ?? DEFAULT_OPENAI_MAX_RETRIES, 0, 6);
-
-  const units = segments.map((segment, index) => ({
-    index,
-    startSec: Number(segment.start.toFixed(2)),
-    endSec: Number(segment.end.toFixed(2)),
-    text: segment.text.slice(0, 220)
-  }));
-
-  const adaptiveTimeoutMs = clamp(45_000 + units.length * 250, 45_000, 300_000);
-  timeoutMs = Math.max(timeoutMs, adaptiveTimeoutMs);
-
-  if (units.length > 160) {
-    retries = Math.max(retries, 2);
-  }
-
-  const systemPrompt = [
-    'SYSTEM PROMPT',
-    'You are splitting a spoken-word transcript into narrative segments targeting approximately 3-6 minutes each.',
-    'Hard rules:',
-    '- Never cut mid-sentence. If a target boundary lands mid-sentence, move forward to the next sentence-ending punctuation before cutting.',
-    '- Never cut mid-anecdote. A story being told must complete before a cut, even if that slightly exceeds target length.',
-    '- Each segment must begin at the start of a complete sentence, never completing a sentence left open by the previous segment.',
-    '- Before finalizing each cut point, check whether the first sentence of the new segment refers back to or completes the last sentence of the previous segment. If it does, move the cut forward one sentence and check again.',
-    '- Do not cut at round time intervals. Cut points must be justified by narrative logic, not timing convenience.',
-    '- In interview-format transcripts, an interviewer question must always stay with the answer that follows it. Never close a segment on an interviewer question - move the cut point to before the question begins.',
-    '- Never split a named story, case study, or example from its setup. If a speaker introduces a story by name or context (e.g. "Let me tell you about United 173" or "Here\'s a study"), the introduction and the story must remain in the same segment.',
-    '- Never split a rhetorical question or conversational handoff from the response it invites. A trailing question at the end of a segment is a signal to move the cut backward, not forward.',
-    'Where to cut (look for natural break signals):',
-    '- A declarative statement functioning as a personal thesis or conclusion.',
-    '- A cliffhanger or threat that lands cleanly.',
-    '- A scene transition - time, location, or cast of characters changes.',
-    '- A shift from backstory or setup into real-time action, or vice versa.',
-    '- A transition from storytelling into lesson-drawing or application.',
-    '- A moment where the emotional register resets.',
-    '- A new interviewer question that opens a genuinely new topic (only valid as a cut point if the question travels with the answer into the new segment).',
-    'What to preserve within each segment:',
-    '- Setup and payoff must stay together. If a detail is planted, the moment it matters must remain in the same segment.',
-    '- Flashbacks or embedded stories must remain entirely within one segment.',
-    '- Escalation sequences such as a chase, crisis, or argument must not be split mid-action.',
-    '- A named framework, model, or concept introduced by the speaker must stay with its initial explanation.',
-    '- Question-and-answer exchanges must not be split. The question and its answer are one unit.',
-    'Output requirements:',
-    '- Return JSON only with this schema: {"chunks":[{"startIndex":number,"endIndex":number,"title":string,"summary":string}]}',
-    '- Indices refer to seconds derived from the transcript timestamps. For example [00:04:47] = index 287.',
-    '- Indices are inclusive, contiguous, ordered, and must cover the full transcript range with no gaps.',
-    '- The title must be a short working title naming the narrative beat, not just a number.',
-    '- The summary must describe the specific narrative content of the segment in one sentence - what actually happens, not a vague label. Example: "Boo explains how the fighter pilot debrief system maps directly onto daily leadership decisions and why most corporate development programs fail to change behavior."',
-    '- If you cannot write a specific summary without vagueness or run-ons, treat that as a signal the segment lacks a clean narrative unit and revisit the cut points before returning output.'
-  ].join('\n');
-
-  const userPrompt = JSON.stringify({
-    task: 'Split transcript into coherent topic chunks.',
-    policy: {
-      softMinSec: policy.softMinSec,
-      softMaxSec: policy.softMaxSec,
-      hardMinSec: policy.hardMinSec,
-      hardMaxSec: policy.hardMaxSec
-    },
-    units
-  });
-
   let attempt = 0;
   let lastWarning = 'Claude AI request failed. Used fallback splitter.';
 
-  while (attempt <= retries) {
+  while (attempt <= config.retries) {
     attempt += 1;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const timer = setTimeout(() => controller.abort(), config.timeoutMs);
+    let response: Response | null = null;
 
     try {
-      const response = await fetchImpl('https://api.anthropic.com/v1/messages', {
+      response = await fetchImpl('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-api-key': apiKey,
+          'x-api-key': config.apiKey,
           'anthropic-version': '2023-06-01'
         },
         body: JSON.stringify({
-          model,
-          max_tokens: 2048,
-          temperature: 0.2,
+          model: options?.model ?? config.model,
+          max_tokens: options?.maxTokens ?? 2048,
+          temperature: options?.temperature ?? 0.2,
           system: systemPrompt,
           messages: [{ role: 'user', content: userPrompt }]
         }),
@@ -647,42 +681,385 @@ const requestAnthropicSplitPlan = async (
       const payload = (await response.json()) as {
         content?: Array<{ type?: string; text?: string }>;
       };
-      const content = payload.content?.find((item) => item.type === 'text')?.text ?? '';
-      const parsed = parseJsonFromText(content);
-      if (!parsed) {
-        lastWarning = 'Claude returned a response but not valid chunk JSON. Used fallback splitter.';
+      const text = payload.content?.find((item) => item.type === 'text')?.text ?? null;
+      if (!text) {
+        lastWarning = 'Claude returned an empty response. Used fallback splitter.';
         throw new Error(lastWarning);
       }
 
-      const normalizedChunks = normalizeAiChunkIndices(parsed.chunks, segments);
-
       return {
-        ranges: normalizeRanges(normalizedChunks, segments.length),
-        attempted: true
+        attempted: true,
+        text
       };
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
         lastWarning = 'Claude request timed out. Used fallback splitter.';
       }
 
-      if (attempt > retries) {
+      if (attempt > config.retries) {
         return {
-          ranges: null,
           attempted: true,
+          text: null,
           warning: lastWarning
         };
       }
 
-      await sleep(Math.min(4_000, 750 * attempt));
+      await sleep(getRetryDelayMs(attempt, response));
     } finally {
       clearTimeout(timer);
     }
   }
 
   return {
-    ranges: null,
     attempted: true,
+    text: null,
     warning: lastWarning
+  };
+};
+
+const buildAnthropicUnits = (segments: Segment[]) =>
+  segments.map((segment, index) => ({
+    index,
+    startSec: Number(segment.start.toFixed(2)),
+    endSec: Number(segment.end.toFixed(2)),
+    text: segment.text.slice(0, 220)
+  }));
+
+const normalizeProposedCuts = (cuts: ProposedCut[], segments: Segment[]): ProposedCut[] => {
+  if (segments.length === 0) {
+    return [];
+  }
+
+  const maxIndex = cuts.reduce((max, cut) => Math.max(max, cut.endIndex), -Infinity);
+  if (!Number.isFinite(maxIndex) || maxIndex <= segments.length - 1) {
+    return cuts;
+  }
+
+  return cuts.map((cut) => ({
+    ...cut,
+    startIndex: mapSecondToSegmentIndex(segments, cut.startIndex, 'start'),
+    endIndex: mapSecondToSegmentIndex(segments, cut.endIndex, 'end')
+  }));
+};
+
+const parseStage1Cuts = (value: string, segments: Segment[]): ChunkRange[] | null => {
+  const parsed = parseJsonValue<{ proposed_cuts?: ProposedCut[]; chunks?: ProposedCut[] }>(value);
+  const cuts = parsed?.proposed_cuts ?? parsed?.chunks;
+  if (!Array.isArray(cuts) || cuts.length === 0) {
+    return null;
+  }
+
+  const normalizedCuts = normalizeProposedCuts(
+    cuts.filter((entry) => Number.isFinite(entry.startIndex) && Number.isFinite(entry.endIndex)),
+    segments
+  );
+
+  if (normalizedCuts.length === 0) {
+    return null;
+  }
+
+  return normalizeRanges(
+    normalizedCuts.map((cut) => ({
+      startIndex: cut.startIndex,
+      endIndex: cut.endIndex
+    })),
+    segments.length
+  );
+};
+
+const requestStage1SplitPlan = async (
+  segments: Segment[],
+  policy: DurationPolicy,
+  settings: AppSettings,
+  fetchImpl: typeof fetch
+): Promise<AiPlanOutcome> => {
+  const units = buildAnthropicUnits(segments);
+  const systemPrompt = [
+    'You are identifying natural narrative segments in a spoken-word transcript.',
+    'Your only job is to propose clean narrative units that will later be validated.',
+    'Do not write titles. Do not write summaries. Do not explain every rule.',
+    'Prefer segments around 2 to 7 minutes, but prioritize narrative completeness over exact timing.',
+    'Look for topic shifts, story endings, lesson pivots, and emotional resets.',
+    'Return JSON only with this schema: {"proposed_cuts":[{"startIndex":number,"endIndex":number,"justification":string}]}.',
+    'Indices refer to transcript timestamps in seconds and must be contiguous, ordered, and cover the full transcript with no gaps.'
+  ].join('\n');
+
+  const userPrompt = JSON.stringify({
+    task: 'Propose narrative cut candidates for later validation.',
+    policy: {
+      preferredMinSec: policy.hardMinSec,
+      preferredMaxSec: policy.hardMaxSec,
+      softMinSec: policy.softMinSec,
+      softMaxSec: policy.softMaxSec
+    },
+    units
+  });
+
+  const response = await callAnthropicText(systemPrompt, userPrompt, settings, fetchImpl, {
+    maxTokens: 1800,
+    unitCount: units.length
+  });
+
+  if (!response.text) {
+    return {
+      ranges: null,
+      attempted: response.attempted,
+      ...(response.warning ? { warning: response.warning } : {})
+    };
+  }
+
+  const ranges = parseStage1Cuts(response.text, segments);
+  if (!ranges) {
+    return {
+      ranges: null,
+      attempted: response.attempted,
+      warning: 'Claude returned Stage 1 output but not valid proposed cuts. Used fallback splitter.'
+    };
+  }
+
+  return {
+    ranges,
+    attempted: response.attempted
+  };
+};
+
+const isSentenceEnding = (text: string): boolean => /[.!?]["')\]]?\s*$/.test(text.trim());
+const startsLikeSentence = (text: string): boolean => /^["'([A-Z0-9]/.test(text.trim());
+
+const getSentenceWindowText = (segments: Segment[], startIndex: number, endIndex: number): string =>
+  segments
+    .slice(startIndex, endIndex + 1)
+    .map((segment) => segment.text)
+    .join(' ')
+    .trim();
+
+const findSentenceBoundaryWithCompromise = (
+  segments: Segment[],
+  startIndex: number,
+  boundaryIndex: number,
+  maxIndex: number
+): number | null => {
+  if (startIndex > maxIndex) {
+    return null;
+  }
+
+  for (let candidate = boundaryIndex; candidate <= maxIndex; candidate += 1) {
+    const windowText = getSentenceWindowText(segments, startIndex, candidate);
+    if (!windowText) {
+      continue;
+    }
+
+    const sentences = nlp(windowText).sentences().json();
+    if (sentences.length === 0) {
+      continue;
+    }
+
+    const normalizedWindow = normalizeText(windowText);
+    const leadingText = normalizeText(getSentenceWindowText(segments, startIndex, Math.max(startIndex, candidate - 1)));
+    const sentenceBoundaryMatches = sentences.some((sentence: { text?: string }) => {
+      const sentenceText = normalizeText(String((sentence as { text?: string }).text ?? ''));
+      if (!sentenceText || !normalizedWindow.endsWith(sentenceText)) {
+        return false;
+      }
+
+      return leadingText.length === 0 || leadingText.length < normalizedWindow.length - sentenceText.length + 1;
+    });
+
+    if (sentenceBoundaryMatches || isSentenceEnding(segments[candidate]?.text ?? '')) {
+      return candidate;
+    }
+  }
+
+  return null;
+};
+
+const precheckBoundaryIndex = (segments: Segment[], boundaryIndex: number, minIndex: number, maxIndex: number): number => {
+  const boundaryText = segments[boundaryIndex]?.text ?? '';
+  const nextText = segments[boundaryIndex + 1]?.text ?? '';
+  if (isSentenceEnding(boundaryText) && (nextText.length === 0 || startsLikeSentence(nextText))) {
+    return boundaryIndex;
+  }
+
+  const searchStart = Math.max(minIndex, boundaryIndex - 2);
+  const resolvedBoundary = findSentenceBoundaryWithCompromise(segments, searchStart, boundaryIndex, maxIndex);
+  if (resolvedBoundary !== null) {
+    return resolvedBoundary;
+  }
+
+  for (let index = Math.min(boundaryIndex + 1, maxIndex); index <= maxIndex; index += 1) {
+    if (isSentenceEnding(segments[index]?.text ?? '')) {
+      return index;
+    }
+  }
+
+  return boundaryIndex;
+};
+const detectBoundaryRiskSignals = (segments: Segment[], boundaryIndex: number): BoundaryRiskSignal[] => {
+  const start = Math.max(0, boundaryIndex - 2);
+  const end = Math.min(segments.length - 1, boundaryIndex + 2);
+  const nearbyText = segments.slice(start, end + 1).map((segment) => segment.text).join(' ').toLowerCase();
+  const signals = new Set<BoundaryRiskSignal>();
+
+  if (/\?/.test(nearbyText)) {
+    signals.add('question');
+  }
+
+  if (/let me tell you|story|case study|study|united \d+|flight \d+/i.test(nearbyText)) {
+    signals.add('story');
+  }
+
+  if (/i call it|we call it|effect|methodology|framework/i.test(nearbyText)) {
+    signals.add('framework');
+  }
+
+  if (/this is why|which means|and so|therefore|because of that|that is why/i.test(nearbyText)) {
+    signals.add('continuation');
+  }
+
+  return [...signals];
+};
+
+const buildValidationWindow = (segments: Segment[], boundaryIndex: number, windowRadius = 4): string => {
+  const start = Math.max(0, boundaryIndex - windowRadius);
+  const end = Math.min(segments.length - 1, boundaryIndex + 1 + windowRadius);
+  const before = segments.slice(start, boundaryIndex + 1).map((segment) => segment.text).join(' ');
+  const after = segments.slice(boundaryIndex + 1, end + 1).map((segment) => segment.text).join(' ');
+  return `${before} <<<CUT>>> ${after}`;
+};
+
+const parseStage2Validation = (value: string): Stage2ValidationResult | null => {
+  const parsed = parseJsonValue<Stage2ValidationResult>(value);
+  if (!parsed || typeof parsed.overall_pass !== 'boolean' || typeof parsed.move !== 'string' || typeof parsed.reason !== 'string') {
+    return null;
+  }
+
+  if (!['keep', 'forward', 'backward'].includes(parsed.move)) {
+    return null;
+  }
+
+  return parsed;
+};
+
+const requestStage2BoundaryValidation = async (
+  segments: Segment[],
+  boundaryIndex: number,
+  settings: AppSettings,
+  fetchImpl: typeof fetch
+): Promise<{ attempted: boolean; result: Stage2ValidationResult | null; warning?: string }> => {
+  const systemPrompt = [
+    'You are validating a single transcript boundary.',
+    'The cut point is marked with <<<CUT>>>.',
+    'Check whether this cut breaks sentence completion, question/answer pairing, story setup/payoff, or framework intro/explanation.',
+    'Return JSON only with this schema: {"overall_pass":boolean,"move":"keep"|"forward"|"backward","reason":string,"flags":[string]}.',
+    'Use move="forward" if the cut should move later, move="backward" if it should move earlier, and move="keep" if the cut is acceptable.'
+  ].join('\n');
+
+  const userPrompt = buildValidationWindow(segments, boundaryIndex);
+  const response = await callAnthropicText(systemPrompt, userPrompt, settings, fetchImpl, {
+    maxTokens: 400,
+    unitCount: 1
+  });
+
+  if (!response.text) {
+    return {
+      attempted: response.attempted,
+      result: null,
+      ...(response.warning ? { warning: response.warning } : {})
+    };
+  }
+
+  const result = parseStage2Validation(response.text);
+  if (!result) {
+    return {
+      attempted: response.attempted,
+      result: null,
+      warning: 'Claude returned Stage 2 output but not valid validation JSON. Kept original boundary.'
+    };
+  }
+
+  return {
+    attempted: response.attempted,
+    result
+  };
+};
+
+const rangesToBoundaries = (ranges: ChunkRange[]): number[] => ranges.slice(0, -1).map((range) => range.endIndex);
+
+const boundariesToRanges = (boundaries: number[], segmentCount: number): ChunkRange[] => {
+  if (segmentCount === 0) {
+    return [];
+  }
+
+  const ranges: ChunkRange[] = [];
+  let startIndex = 0;
+  for (const boundary of boundaries) {
+    ranges.push({ startIndex, endIndex: boundary });
+    startIndex = boundary + 1;
+  }
+  ranges.push({ startIndex, endIndex: segmentCount - 1 });
+  return normalizeRanges(ranges, segmentCount);
+};
+
+const validateProposedRanges = async (
+  ranges: ChunkRange[],
+  segments: Segment[],
+  settings: AppSettings,
+  fetchImpl: typeof fetch,
+  emitStatus?: (message: string) => void
+): Promise<{ ranges: ChunkRange[]; attempted: boolean; warning?: string }> => {
+  if (ranges.length <= 1) {
+    return { ranges, attempted: false };
+  }
+
+  const boundaries = rangesToBoundaries(ranges);
+  let attempted = false;
+  const warnings: string[] = [];
+
+  for (let boundaryPosition = 0; boundaryPosition < boundaries.length; boundaryPosition += 1) {
+    const previousBoundary = boundaryPosition === 0 ? -1 : boundaries[boundaryPosition - 1];
+    const nextBoundary = boundaryPosition === boundaries.length - 1 ? segments.length - 1 : boundaries[boundaryPosition + 1];
+    const minIndex = previousBoundary + 1;
+    const maxIndex = nextBoundary - 1;
+    let boundaryIndex = boundaries[boundaryPosition];
+
+    const prechecked = precheckBoundaryIndex(segments, boundaryIndex, minIndex, maxIndex);
+    if (prechecked !== boundaryIndex) {
+      emitStatus?.(`Auto-adjusted boundary ${boundaryPosition + 1}/${boundaries.length} to next sentence end.`);
+      boundaryIndex = prechecked;
+      boundaries[boundaryPosition] = boundaryIndex;
+    }
+
+    const riskSignals = detectBoundaryRiskSignals(segments, boundaryIndex);
+    if (riskSignals.length === 0) {
+      continue;
+    }
+
+    emitStatus?.(`Validating boundary ${boundaryPosition + 1}/${boundaries.length} (${riskSignals.join(', ')}).`);
+    const validation = await requestStage2BoundaryValidation(segments, boundaryIndex, settings, fetchImpl);
+    attempted ||= validation.attempted;
+    if (validation.warning) {
+      warnings.push(validation.warning);
+    }
+
+    const result = validation.result;
+    if (!result || result.overall_pass || result.move === 'keep') {
+      continue;
+    }
+
+    if (result.move === 'forward') {
+      boundaries[boundaryPosition] = precheckBoundaryIndex(segments, Math.min(boundaryIndex + 1, maxIndex), minIndex, maxIndex);
+      continue;
+    }
+
+    if (result.move === 'backward') {
+      boundaries[boundaryPosition] = Math.max(minIndex, boundaryIndex - 1);
+    }
+  }
+
+  return {
+    ranges: boundariesToRanges(boundaries, segments.length),
+    attempted,
+    ...(warnings.length > 0 ? { warning: warnings.join(' | ') } : {})
   };
 };
 
@@ -694,8 +1071,21 @@ const requestAiSplitPlan = async (
   emitStatus?: (message: string) => void
 ): Promise<HierarchicalAiPlanOutcome> => {
   if ((settings.anthropicApiKey?.trim() ?? '').length === 0 || segments.length <= LONG_TRANSCRIPT_SEGMENT_THRESHOLD) {
-    const outcome = await requestAnthropicSplitPlan(segments, policy, settings, fetchImpl);
-    return { ...outcome, usedWindowing: false };
+    const stage1Outcome = await requestStage1SplitPlan(segments, policy, settings, fetchImpl);
+    if (!stage1Outcome.ranges) {
+      return { ...stage1Outcome, usedWindowing: false };
+    }
+
+    emitStatus?.('Running local sentence pre-check and boundary validation.');
+    const validated = await validateProposedRanges(stage1Outcome.ranges, segments, settings, fetchImpl, emitStatus);
+    return {
+      ranges: validated.ranges,
+      attempted: stage1Outcome.attempted || validated.attempted,
+      usedWindowing: false,
+      ...(stage1Outcome.warning || validated.warning
+        ? { warning: [stage1Outcome.warning, validated.warning].filter(Boolean).join(' | ') }
+        : {})
+    };
   }
 
   const windows = buildCoarseWindows(segments);
@@ -708,10 +1098,9 @@ const requestAiSplitPlan = async (
   for (let index = 0; index < windows.length; index += 1) {
     const windowRange = windows[index];
     const windowSegments = segments.slice(windowRange.startIndex, windowRange.endIndex + 1);
+    emitStatus?.(`Stage 1 proposal window ${index + 1}/${windows.length} with ${windowSegments.length} segment unit(s).`);
 
-    emitStatus?.(`Planning window ${index + 1}/${windows.length} with ${windowSegments.length} segment unit(s).`);
-
-    const outcome = await requestAnthropicSplitPlan(windowSegments, policy, settings, fetchImpl);
+    const outcome = await requestStage1SplitPlan(windowSegments, policy, settings, fetchImpl);
     attempted ||= outcome.attempted;
 
     if (outcome.ranges && outcome.ranges.length > 0) {
@@ -723,46 +1112,245 @@ const requestAiSplitPlan = async (
           summary: range.summary
         });
       }
-      continue;
+    } else {
+      const fallbackRanges = deterministicSplit(windowSegments, policy).map((range) => ({
+        startIndex: windowRange.startIndex + range.startIndex,
+        endIndex: windowRange.startIndex + range.endIndex,
+        title: range.title,
+        summary: range.summary
+      }));
+      stitchedRanges.push(...fallbackRanges);
+      const windowStart = formatClockTimestamp(segments[windowRange.startIndex].start);
+      const windowEnd = formatClockTimestamp(segments[windowRange.endIndex].end);
+      warnings.push(`${outcome.warning ?? 'Claude window planning failed.'} Used deterministic planning for window ${index + 1} (${windowStart} - ${windowEnd}).`);
     }
-
-    const fallbackRanges = deterministicSplit(windowSegments, policy).map((range) => ({
-      startIndex: windowRange.startIndex + range.startIndex,
-      endIndex: windowRange.startIndex + range.endIndex,
-      title: range.title,
-      summary: range.summary
-    }));
-    stitchedRanges.push(...fallbackRanges);
-
-    const windowStart = formatClockTimestamp(segments[windowRange.startIndex].start);
-    const windowEnd = formatClockTimestamp(segments[windowRange.endIndex].end);
-    const baseWarning = outcome.warning ?? 'Claude window planning failed.';
-    warnings.push(`${baseWarning} Used deterministic planning for window ${index + 1} (${windowStart} - ${windowEnd}).`);
   }
 
-  const warning = warnings.length > 0 ? warnings.join(' | ') : undefined;
+  const normalized = stitchedRanges.length > 0 ? normalizeRanges(stitchedRanges, segments.length) : null;
+  if (!normalized) {
+    return {
+      ranges: null,
+      attempted,
+      usedWindowing: true,
+      ...(warnings.length > 0 ? { warning: warnings.join(' | ') } : {})
+    };
+  }
+
+  emitStatus?.('Running local sentence pre-check and boundary validation.');
+  const validated = await validateProposedRanges(normalized, segments, settings, fetchImpl, emitStatus);
+
   return {
-    ranges: stitchedRanges.length > 0 ? normalizeRanges(stitchedRanges, segments.length) : null,
-    attempted,
+    ranges: validated.ranges,
+    attempted: attempted || validated.attempted,
     usedWindowing: true,
-    ...(warning ? { warning } : {})
+    ...((warnings.length > 0 || validated.warning)
+      ? { warning: [...warnings, validated.warning].filter(Boolean).join(' | ') }
+      : {})
+  };
+};
+const cleanGeneratedText = (value: string): string => normalizeText(value);
+
+type AssemblyPolicy = {
+  preferredMinSec: number;
+  preferredMaxSec: number;
+  extendedMaxSec: number;
+};
+
+const getRangeDurationSec = (segments: Segment[], range: ChunkRange): number => segments[range.endIndex].end - segments[range.startIndex].start;
+
+const getAssemblyPolicy = (policy: DurationPolicy): AssemblyPolicy => ({
+  preferredMinSec: Math.max(policy.softMinSec + 60, 240),
+  preferredMaxSec: Math.max(policy.softMaxSec, 360),
+  extendedMaxSec: Math.max(policy.hardMaxSec + 120, policy.softMaxSec + 180)
+});
+
+const scoreRangeAsVideoEnding = (
+  segments: Segment[],
+  range: ChunkRange,
+  policy: AssemblyPolicy,
+  isFinalRange: boolean
+): number => {
+  const duration = getRangeDurationSec(segments, range);
+  const center = (policy.preferredMinSec + policy.preferredMaxSec) / 2;
+  const distancePenalty = Math.abs(duration - center) / Math.max(center, 1);
+  const boundaryText = segments[range.endIndex]?.text ?? '';
+  const cueScore = getBoundaryCueScore(boundaryText);
+  const punctuationScore = /[.!?]["']?\s*$/.test(boundaryText) ? 0.5 : 0;
+  const finalBonus = isFinalRange ? 0.35 : 0;
+  return 3 - distancePenalty + cueScore + punctuationScore + finalBonus;
+};
+
+const assembleFinalVideoRanges = (ranges: ChunkRange[], segments: Segment[], policy: DurationPolicy): ChunkRange[] => {
+  if (ranges.length <= 1) {
+    return ranges;
+  }
+
+  const assemblyPolicy = getAssemblyPolicy(policy);
+  const merged: ChunkRange[] = [];
+  let cursor = 0;
+
+  while (cursor < ranges.length) {
+    const startRange = ranges[cursor];
+    let endCursor = cursor;
+
+    while (endCursor < ranges.length - 1) {
+      const current: ChunkRange = {
+        startIndex: startRange.startIndex,
+        endIndex: ranges[endCursor].endIndex
+      };
+      const next: ChunkRange = {
+        startIndex: startRange.startIndex,
+        endIndex: ranges[endCursor + 1].endIndex
+      };
+      const currentDuration = getRangeDurationSec(segments, current);
+      const nextDuration = getRangeDurationSec(segments, next);
+      const nextUnitDuration = getRangeDurationSec(segments, ranges[endCursor + 1]);
+
+      if (currentDuration < assemblyPolicy.preferredMinSec && nextDuration <= assemblyPolicy.extendedMaxSec) {
+        endCursor += 1;
+        continue;
+      }
+
+      if (nextUnitDuration < 75 && nextDuration <= assemblyPolicy.extendedMaxSec) {
+        endCursor += 1;
+        continue;
+      }
+
+      if (currentDuration >= assemblyPolicy.preferredMaxSec) {
+        break;
+      }
+
+      if (nextDuration > assemblyPolicy.extendedMaxSec) {
+        break;
+      }
+
+      const currentScore = scoreRangeAsVideoEnding(segments, current, assemblyPolicy, endCursor === ranges.length - 1);
+      const nextScore = scoreRangeAsVideoEnding(segments, next, assemblyPolicy, endCursor + 1 === ranges.length - 1);
+      if (nextScore >= currentScore - 0.15) {
+        endCursor += 1;
+        continue;
+      }
+
+      break;
+    }
+
+    merged.push({
+      startIndex: startRange.startIndex,
+      endIndex: ranges[endCursor].endIndex
+    });
+    cursor = endCursor + 1;
+  }
+
+  return normalizeRanges(merged, segments.length);
+};
+
+const summarizeVideoFromChunks = (chunks: SplitChunk[], text: string): string => {
+  const summary = cleanGeneratedText(
+    chunks
+      .map((chunk) => chunk.summary)
+      .filter((value) => value.length > 0)
+      .slice(0, 2)
+      .join(' ')
+  );
+
+  if (summary.length > 0) {
+    return summary;
+  }
+
+  return cleanGeneratedText(summarizeChunk(text));
+};
+
+const titleVideoFromChunks = (chunks: SplitChunk[], text: string, index: number): string => {
+  if (chunks.length === 1 && chunks[0].title.trim().length > 0) {
+    return cleanGeneratedText(chunks[0].title);
+  }
+
+  return cleanGeneratedText(titleChunk(text, index));
+};
+
+type Stage3MetadataResponse = {
+  attempted: boolean;
+  ranges: ChunkRange[];
+  warning?: string;
+};
+
+const parseStage3Metadata = (value: string): Stage3VideoMetadata | null => {
+  const parsed = parseJsonValue<Stage3VideoMetadata>(value);
+  if (!parsed || typeof parsed.title !== 'string' || typeof parsed.summary !== 'string') {
+    return null;
+  }
+
+  return {
+    title: cleanGeneratedText(parsed.title),
+    summary: cleanGeneratedText(parsed.summary)
   };
 };
 
-const buildManifest = (
+const requestStage3VideoMetadata = async (
   transcript: NormalizedTranscript,
   ranges: ChunkRange[],
-  mode: SplitMode,
-  policy: DurationPolicy,
-  aiAttempted: boolean,
-  aiWarning?: string
-): SplitManifest => {
-  const chunks: SplitChunk[] = ranges.map((range, index) => {
+  settings: AppSettings,
+  fetchImpl: typeof fetch,
+  emitStatus?: (message: string) => void
+): Promise<Stage3MetadataResponse> => {
+  const enrichedRanges = [...ranges];
+  let attempted = false;
+  const warnings: string[] = [];
+
+  for (let index = 0; index < enrichedRanges.length; index += 1) {
+    const range = enrichedRanges[index];
+    const segmentText = makeChunkText(transcript.segments, range);
+    const fallbackTitle = cleanGeneratedText(titleChunk(segmentText, index));
+    const fallbackSummary = cleanGeneratedText(summarizeChunk(segmentText));
+    emitStatus?.(`Generating final summary for video ${index + 1}/${enrichedRanges.length}.`);
+
+    const systemPrompt = [
+      'You are generating a working title and one-sentence summary for a final podcast microvideo.',
+      'The title should name the specific narrative beat, not a generic segment label.',
+      'The summary should describe the complete arc of this final video in one sentence.',
+      'Return JSON only with this schema: {"title":string,"summary":string}.'
+    ].join('\n');
+
+    const userPrompt = `VIDEO ${index + 1}\nSTART: ${formatClockTimestamp(transcript.segments[range.startIndex].start)}\nEND: ${formatClockTimestamp(transcript.segments[range.endIndex].end)}\n\n${segmentText}`;
+    const response = await callAnthropicText(systemPrompt, userPrompt, settings, fetchImpl, {
+      maxTokens: 300,
+      unitCount: Math.max(1, Math.ceil(segmentText.split(/\s+/g).filter(Boolean).length / 150))
+    });
+    attempted ||= response.attempted;
+
+    const metadata = response.text ? parseStage3Metadata(response.text) : null;
+    if (!metadata) {
+      if (response.warning) {
+        warnings.push(response.warning);
+      }
+      enrichedRanges[index] = {
+        ...range,
+        title: fallbackTitle,
+        summary: fallbackSummary
+      };
+      continue;
+    }
+
+    enrichedRanges[index] = {
+      ...range,
+      title: metadata.title,
+      summary: metadata.summary
+    };
+  }
+
+  return {
+    attempted,
+    ranges: enrichedRanges,
+    ...(warnings.length > 0 ? { warning: warnings.join(' | ') } : {})
+  };
+};
+const buildPlanningChunks = (transcript: NormalizedTranscript, ranges: ChunkRange[]): SplitChunk[] =>
+  ranges.map((range, index) => {
     const startSec = transcript.segments[range.startIndex].start;
     const endSec = transcript.segments[range.endIndex].end;
     const text = makeChunkText(transcript.segments, range);
-    const title = normalizeText(range.title ?? titleChunk(text, index));
-    const summary = normalizeText(range.summary ?? summarizeChunk(text));
+    const title = cleanGeneratedText(range.title ?? titleChunk(text, index));
+    const summary = cleanGeneratedText(range.summary ?? summarizeChunk(text));
 
     return {
       index: index + 1,
@@ -771,10 +1359,55 @@ const buildManifest = (
       startSec: Number(startSec.toFixed(3)),
       endSec: Number(endSec.toFixed(3)),
       durationSec: Number((endSec - startSec).toFixed(3)),
-      textFile: `part-${String(index + 1).padStart(2, '0')}.txt`,
+      textFile: `internal-unit-${String(index + 1).padStart(2, '0')}.txt`,
       charCount: text.length
     };
   });
+
+const buildFinalVideos = (
+  transcript: NormalizedTranscript,
+  planningRanges: ChunkRange[],
+  planningChunks: SplitChunk[],
+  finalRanges: ChunkRange[],
+  mode: SplitMode
+): SplitVideo[] =>
+  finalRanges.map((range, index) => {
+    const startSec = transcript.segments[range.startIndex].start;
+    const endSec = transcript.segments[range.endIndex].end;
+    const text = makeChunkText(transcript.segments, range);
+    const sourceChunkIndexes = planningRanges
+      .map((planningRange, planningIndex) => ({ planningRange, planningIndex }))
+      .filter(({ planningRange }) => planningRange.startIndex >= range.startIndex && planningRange.endIndex <= range.endIndex)
+      .map(({ planningIndex }) => planningIndex + 1);
+    const sourceChunks = sourceChunkIndexes.map((sourceIndex) => planningChunks[sourceIndex - 1]).filter(Boolean);
+    const verificationStatus: SplitVideoVerificationStatus = mode === 'ai' ? 'assembled' : 'fallback';
+
+    return {
+      index: index + 1,
+      title: cleanGeneratedText(range.title ?? titleVideoFromChunks(sourceChunks, text, index)),
+      summary: cleanGeneratedText(range.summary ?? summarizeVideoFromChunks(sourceChunks, text)),
+      startSec: Number(startSec.toFixed(3)),
+      endSec: Number(endSec.toFixed(3)),
+      durationSec: Number((endSec - startSec).toFixed(3)),
+      textFile: `video-${String(index + 1).padStart(2, '0')}.txt`,
+      charCount: text.length,
+      sourceChunkIndexes,
+      verificationStatus,
+      ...(sourceChunkIndexes.length > 1 ? { notes: [`Assembled from internal units ${sourceChunkIndexes.join(', ')}.`] } : {})
+    };
+  });
+
+const buildManifest = (
+  transcript: NormalizedTranscript,
+  planningRanges: ChunkRange[],
+  finalRanges: ChunkRange[],
+  mode: SplitMode,
+  policy: DurationPolicy,
+  aiAttempted: boolean,
+  aiWarning?: string
+): SplitManifest => {
+  const chunks = buildPlanningChunks(transcript, planningRanges);
+  const videos = buildFinalVideos(transcript, planningRanges, chunks, finalRanges, mode);
 
   return {
     source: {
@@ -789,40 +1422,92 @@ const buildManifest = (
       ...(aiWarning ? { warning: aiWarning } : {})
     },
     durationPolicy: policy,
+    videos,
     chunks
   };
+};
+
+const formatManifestDuration = (durationSec: number): string => {
+  const totalSeconds = Math.max(0, Math.round(durationSec));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  }
+
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+};
+
+const formatVideoManifestTimestamp = (seconds: number): string => {
+  const totalSeconds = Math.max(0, Math.round(seconds));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const secs = totalSeconds % 60;
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+};
+
+const buildHumanReadableVideoManifest = (transcript: NormalizedTranscript, manifest: SplitManifest): string => {
+  const label = transcript.fileName.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim() || 'Source Video';
+  const totalRuntime = transcript.segments.length > 0 ? transcript.segments[transcript.segments.length - 1].end : 0;
+  const lines: string[] = [
+    `# ${label} - Video Manifest`,
+    `# Total runtime: ${formatManifestDuration(totalRuntime)}`,
+    `# Videos: ${manifest.videos.length}`,
+    '',
+    '---',
+    ''
+  ];
+
+  manifest.videos.forEach((video, index) => {
+    lines.push(`**Video ${video.index}: [${formatVideoManifestTimestamp(video.startSec)} - ${formatVideoManifestTimestamp(video.endSec)}]**`);
+    lines.push(`Duration: ${formatManifestDuration(video.durationSec)}`);
+    lines.push(`Summary: ${video.summary}`);
+    if (index < manifest.videos.length - 1) {
+      lines.push('');
+      lines.push('---');
+      lines.push('');
+    }
+  });
+
+  return `${lines.join('\n')}\n`;
 };
 
 const writeManifestOutput = async (
   outputFolderPath: string,
   transcript: NormalizedTranscript,
   manifest: SplitManifest,
-  ranges: ChunkRange[]
+  finalRanges: ChunkRange[]
 ): Promise<SplitSuccess> => {
-  const baseFolder = path.join(outputFolderPath, 'chunks', safeFileSlug(transcript.fileName));
+  const baseFolder = path.join(outputFolderPath, 'videos', safeFileSlug(transcript.fileName));
   await fs.mkdir(baseFolder, { recursive: true });
 
-  for (const chunk of manifest.chunks) {
-    const range = ranges[chunk.index - 1];
+  for (const video of manifest.videos) {
+    const range = finalRanges[video.index - 1];
     const content = makeChunkText(transcript.segments, range);
-    await fs.writeFile(path.join(baseFolder, chunk.textFile), `${content}\n`, 'utf8');
+    await fs.writeFile(path.join(baseFolder, video.textFile), `${content}\n`, 'utf8');
   }
 
   const manifestPath = path.join(baseFolder, 'manifest.json');
-  await fs.writeFile(`${manifestPath}`, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+  await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+
+  const videoManifestPath = path.join(baseFolder, 'video-manifest.txt');
+  await fs.writeFile(videoManifestPath, buildHumanReadableVideoManifest(transcript, manifest), 'utf8');
 
   return {
     sourcePath: transcript.sourcePath,
     outputFolderPath: baseFolder,
     manifestPath,
-    chunkCount: manifest.chunks.length,
+    videoManifestPath,
+    videoCount: manifest.videos.length,
+    chunkCount: manifest.videos.length,
     generationMode: manifest.generationMode,
     splitMethod: manifest.splitMethod,
     aiAttempted: manifest.ai.attempted,
     ...(manifest.ai.warning ? { aiWarning: manifest.ai.warning } : {})
   };
 };
-
 const ensureValidRequest = (request: SplitRequest) => {
   if (!request || typeof request !== 'object') {
     throw new Error('Invalid split request.');
@@ -920,18 +1605,39 @@ export const splitPodcastTranscripts = async (request: SplitRequest, options: Sp
         });
       }
 
-      const normalizedRanges = enforceDurationPolicy(normalizeRanges(ranges, transcript.segments.length), transcript.segments, policy);
-      const manifest = buildManifest(transcript, normalizedRanges, mode, policy, aiOutcome.attempted, aiOutcome.warning);
-
-      emitStatus('Writing chunk files and manifest.', {
+      const planningRanges = enforceDurationPolicy(normalizeRanges(ranges, transcript.segments.length), transcript.segments, policy);
+      emitStatus(`Assembling final videos from ${planningRanges.length} internal unit(s).`, {
         sourcePath: transcript.sourcePath,
         fileName: transcript.fileName
       });
+      const finalRanges = assembleFinalVideoRanges(planningRanges, transcript.segments, policy);
+      const stage3Outcome = await requestStage3VideoMetadata(transcript, finalRanges, options.settings, fetchImpl, (message) =>
+        emitStatus(message, {
+          sourcePath: transcript.sourcePath,
+          fileName: transcript.fileName
+        })
+      );
+      if (stage3Outcome.warning) {
+        warnings.push(`${transcript.fileName}: ${stage3Outcome.warning}`);
+      }
+      const manifest = buildManifest(
+        transcript,
+        planningRanges,
+        stage3Outcome.ranges,
+        mode,
+        policy,
+        aiOutcome.attempted || stage3Outcome.attempted,
+        aiOutcome.warning ?? stage3Outcome.warning
+      );
 
-      const success = await writeManifestOutput(outputFolderPath, transcript, manifest, normalizedRanges);
+      emitStatus('Writing video files and manifests.', {
+        sourcePath: transcript.sourcePath,
+        fileName: transcript.fileName
+      });
+      const success = await writeManifestOutput(outputFolderPath, transcript, manifest, stage3Outcome.ranges);
       successes.push(success);
 
-      emitStatus(`Completed split with ${success.chunkCount} chunk(s) via ${success.generationMode}.`, {
+      emitStatus(`Completed split with ${success.videoCount} video(s) via ${success.generationMode}.`, {
         sourcePath: transcript.sourcePath,
         fileName: transcript.fileName
       });
@@ -991,10 +1697,28 @@ export const __testables = {
   synthesizeSegmentsFromText,
   getDurationPolicy,
   buildCoarseWindows,
-  requestAiSplitPlan
+  requestAiSplitPlan,
+  precheckBoundaryIndex,
+  detectBoundaryRiskSignals,
+  assembleFinalVideoRanges,
+  buildHumanReadableVideoManifest
 };
 
 export const formatChunkTimeRange = (startSec: number, endSec: number): string => `${formatClockTimestamp(startSec)} - ${formatClockTimestamp(endSec)}`;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
